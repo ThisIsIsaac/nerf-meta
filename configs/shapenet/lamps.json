@@ -1,6 +1,7 @@
 {
-    "dataset_root": "./data/shapenetlamps/lamps/03636649",
-    "splits_path": "./data/shapenetlamps/lamp_splits.json",
+    "exp_name": "shapenet_lamps",
+    "dataset_root": "/data/private/metaNeRF_datasets/shapenet/03636649",
+    "splits_path": "/data/private/metaNeRF_datasets/shapenet/lamp_splits.json",
 
     "max_freq": 8,
     "num_freqs": 20,

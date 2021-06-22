@@ -1,5 +1,6 @@
 {
-    "dataset_root": "./data/shapenetchairs/chairs/03001627",
+    "exp_name": "shapenet_chairs",
+    "dataset_root": "/data/private/ShapeNetCore.v2/03001627",
     "splits_path": "./data/shapenetchairs/chair_splits.json",
 
     "max_freq": 8,

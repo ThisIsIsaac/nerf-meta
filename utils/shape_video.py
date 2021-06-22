@@ -86,4 +86,4 @@ def create_360_video(args, model, hwf, bound, device, scene_id, savedir):
     video_path = savedir.joinpath(f"{scene_id}.mp4")
     imageio.mimwrite(video_path, video_frames, fps=30)
 
-    return None
+    return video_frames

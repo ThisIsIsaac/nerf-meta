@@ -1,4 +1,5 @@
 {
+    "exp_name": "shapenet_cars",
     "dataset_root": "./data/shapenetcars/cars/02958343",
     "splits_path": "./data/shapenetcars/car_splits.json",
 
