@@ -8,6 +8,21 @@ from datasets.shapenet import build_shapenet
 from models.nerf import build_nerf
 from models.rendering import get_rays_shapenet, sample_points, volume_render
 
+def train_step(model, optim, imgs, poses, hwf, bound, rays_o, rays_d, num_samples, raybatch_size):
+    pixels = imgs.reshape(-1, 3)
+    num_rays = rays_d.shape[0]
+    indices = torch.randint(num_rays, size=[raybatch_size])
+    raybatch_o, raybatch_d = rays_o[indices], rays_d[indices]
+    pixelbatch = pixels[indices]
+    t_vals, xyz = sample_points(raybatch_o, raybatch_d, bound[0], bound[1],
+                                num_samples, perturb=True)
+
+    optim.zero_grad()
+    rgbs, sigmas = model(xyz)
+    colors = volume_render(rgbs, sigmas, t_vals, white_bkgd=True)
+    loss = F.mse_loss(colors, pixelbatch)
+    loss.backward()
+    optim.step()
 
 def inner_loop(model, optim, imgs, poses, hwf, bound, num_samples,
                raybatch_size, inner_steps):
@@ -28,7 +43,7 @@ def inner_loop(model, optim, imgs, poses, hwf, bound, num_samples,
                                     num_samples, perturb=True)
 
         optim.zero_grad()
-        rgbs, sigmas = model(xyz)
+        rgbs, sigmas = model(imgs, xyz)
         colors = volume_render(rgbs, sigmas, t_vals, white_bkgd=True)
         loss = F.mse_loss(colors, pixelbatch)
         loss.backward()
@@ -42,29 +57,12 @@ def train_meta(args, meta_model, meta_optim, data_loader, device):
     """
 
     #* outer loop
-    for imgs, poses, hwf, bound in data_loader:
-        imgs, poses, hwf, bound = imgs.to(device), poses.to(device), hwf.to(
-            device), bound.to(device)
-        imgs, poses, hwf, bound = imgs.squeeze(), poses.squeeze(), \
-                                  hwf.squeeze(), bound.squeeze()
 
-        meta_optim.zero_grad()
 
-        inner_model = copy.deepcopy(meta_model)
-        inner_optim = torch.optim.SGD(inner_model.parameters(), args.inner_lr)
 
-        #* inner loop
-        inner_loop(inner_model, inner_optim, imgs, poses,
-                   hwf, bound, args.num_samples,
-                   args.train_batchsize, args.inner_steps)
 
-        #* calculate meta gradient
-        with torch.no_grad():
-            for meta_param, inner_param in zip(meta_model.parameters(),
-                                               inner_model.parameters()):
-                meta_param.grad = meta_param - inner_param
 
-        meta_optim.step()
+
 
 
 def report_result(model, imgs, poses, hwf, bound, num_samples, raybatch_size):
@@ -140,10 +138,6 @@ def main():
                              'or lamps)')
     args = parser.parse_args()
 
-    resnet = torch.hub.load('pytorch/vision:v0.9.0', 'resnet34', pretrained=True)
-    resnet.eval()
-    resnet.requires_grad = False
-
     with open(args.config) as config:
         info = json.load(config)
         for key, value in info.items():
@@ -162,23 +156,38 @@ def main():
                              num_views=args.tto_views + args.test_views)
     val_loader = DataLoader(val_set, batch_size=1, shuffle=False)
 
-    meta_model = build_nerf(args)
-    meta_model.to(device)
+    model = build_weight_gen_nerf(args)
+    model.to(device)
 
-    checkpoint = torch.load(args.weight_path, map_location=device)
-    meta_state = checkpoint['meta_model_state_dict']
+    if args.weight_path is not None:
+        checkpoint = torch.load(args.weight_path, map_location=device)
+        model.load_state_dict(checkpoint['weight_generator_state_dict'])
 
-    meta_optim = torch.optim.Adam(meta_model.parameters(), lr=args.meta_lr)
+    optim = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     for epoch in range(1, args.meta_epochs + 1):
-        train_meta(args, meta_model, meta_optim, train_loader, device)
-        val_psnr = val_meta(args, meta_model, val_loader, device)
+        for batch in train_loader:
+            imgs = batch["imgs"]
+            poses = batch["poses"]
+            hwf = batch["hwf"]
+            bound = batch["bound"]
+            rays_o = batch["rays_o"]
+            rays_d = batch["rays_d"]
+
+            imgs, poses, hwf, bound = imgs.squeeze(), poses.squeeze(), \
+                                      hwf.squeeze(), bound.squeeze()
+
+            train_step(model, optim, imgs, poses, hwf, bound, rays_o, rays_d,
+                       args.num_samples, args.tto_batchsize)
+
+
+        val_psnr = val_meta(args, model, val_loader, device)
         print(f"Epoch: {epoch}, val psnr: {val_psnr:0.3f}")
 
         torch.save({
             'epoch': epoch,
-            'meta_model_state_dict': meta_model.state_dict(),
-            'meta_optim_state_dict': meta_optim.state_dict(),
+            'weight_generator_state_dict': model.state_dict(),
+            'optim_state_dict': optim.state_dict(),
         }, f'meta_epoch{epoch}.pth')
 
 

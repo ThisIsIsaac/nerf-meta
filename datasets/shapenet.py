@@ -24,7 +24,7 @@ class ShapenetDataset(Dataset):
         meta_path = folderpath.joinpath("transforms.json")
         with open(meta_path, "r") as meta_file:
             meta_data = json.load(meta_file)
-        
+
         all_imgs = []
         all_poses = []
         for frame_idx in range(self.num_views):
@@ -48,7 +48,7 @@ class ShapenetDataset(Dataset):
         H, W = all_imgs[0].shape[:2]
         camera_angle_x = meta_data["camera_angle_x"]
         camera_angle_x = torch.as_tensor(camera_angle_x, dtype=torch.float)
-        
+
         # camera angle equation: tan(angle/2) = (W/2)/focal
         focal = 0.5 * W / torch.tan(0.5 * camera_angle_x)
         hwf = torch.as_tensor([H, W, focal], dtype=torch.float)
