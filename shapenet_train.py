@@ -9,6 +9,11 @@ from models.nerf import build_nerf
 from models.rendering import get_rays_shapenet, sample_points, volume_render
 import wandb
 from shapenet_test import test
+from rich import print
+from rich import pretty
+pretty.install()
+from rich import traceback
+traceback.install()
 
 def inner_loop(model, optim, imgs, poses, hwf, bound, num_samples, raybatch_size, inner_steps):
     """

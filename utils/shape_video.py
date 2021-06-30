@@ -54,7 +54,7 @@ def get_360_poses(radius=4, phi=math.pi/5, num_poses=120):
     return all_poses
 
 
-def create_360_video(args, model, hwf, bound, device, scene_id, savedir):
+def create_360_video(args, model, hwf, bound, device, scene_id, savedir, step=2):
     """
     create 360 video of a specific shape
     """
@@ -83,7 +83,7 @@ def create_360_video(args, model, hwf, bound, device, scene_id, savedir):
     video_frames = torch.stack(video_frames, dim=0)
     video_frames = video_frames.cpu().numpy()
 
-    video_path = savedir.joinpath(f"{scene_id}.mp4")
+    video_path = savedir.joinpath(f"{scene_id}_step_"+ str(step)+".mp4")
     imageio.mimwrite(video_path, video_frames, fps=30)
 
     return video_frames

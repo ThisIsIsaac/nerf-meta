@@ -81,3 +81,12 @@ def build_nerf(args):
                         hidden_features=args.hidden_features, hidden_layers=args.hidden_layers,
                         out_features=4)
     return model
+
+def set_grad(nerf, bool):
+    nerf.requires_grad=bool
+    for l in nerf.net:
+        if hasattr(l, "weight"):
+            l.weight.requires_grad=bool
+        if hasattr(l, "bias"):
+            l.bias.requires_grad = bool
+    return nerf

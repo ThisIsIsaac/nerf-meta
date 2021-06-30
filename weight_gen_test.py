@@ -66,7 +66,7 @@ def report_result(args, model, imgs, poses, hwf, bound):
     return scene_psnr
 
 
-def test(args):
+def test(args, nerf_model=None, gen_model=None):
     print("running test weights: " + args.weight_path)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -75,9 +75,9 @@ def test(args):
                             num_views=args.tto_views+args.test_views)
     test_loader = DataLoader(test_set, batch_size=1, shuffle=False)
 
+
     model = build_nerf(args)
     model.to(device)
-
     wandb.save(args.weight_path)
     checkpoint = torch.load(args.weight_path, map_location=device)
     meta_state = checkpoint['meta_model_state_dict']
