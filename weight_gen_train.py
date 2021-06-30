@@ -244,8 +244,10 @@ def main():
     else:
         print("must provide path to metaNeRF initial weights")
         raise ValueError()
+    # test(args, nerf_model, gen_model)
 
     wandb.watch(gen_model, log="all", log_freq=100)
+    # val_meta(args, nerf_model, gen_model, val_loader, device)
     print("starting to train...")
     for epoch in range(1, args.meta_epochs+1):
         if epoch > 1:
@@ -261,9 +263,9 @@ def main():
         train_meta(args, nerf_model, gen_model, gen_optim, train_loader, device)
         [val_psnr_0, val_psnr_fin] = val_meta(args, nerf_model, gen_model, val_loader, device)
 
-        print(f"Epoch: {epoch}, val_psnr_0: {val_psnr_0:0.3f}")
+        print(f"Epoch: {epoch}, val_psnr_0: {val_psnr_0:0.3f} | val psnr fin: {val_psnr_fin:0.3f}")
         wandb.log({"epoch":epoch, "val_psnr_0": val_psnr_0})
-        print(f"Epoch: {epoch}, val psnr fin: {val_psnr_fin:0.3f}")
+
         wandb.log({"epoch":epoch, "val_psnr_fin": val_psnr_fin})
     test(args, nerf_model=nerf_model, gen_model=gen_model)
 
