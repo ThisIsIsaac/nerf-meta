@@ -84,47 +84,42 @@ class ShapenetDatasetV2(Dataset):
             self.all_hwf.append(hwf)
             self.all_bounds.append(bound)
 
-            #! remove me!
-            break
+        # self.all_rays_o = []
+        # self.all_rays_d = []
+        # self.idx_map = []
+        # self.num_rays = 0
 
-        self.all_rays_o = []
-        self.all_rays_d = []
-        self.idx_map = []
-        self.num_rays = 0
+        # prev_idx = 0
+        # for (imgs, poses, hwf, bound) in zip(self.all_imgs, self.all_poses, self.all_hwf, self.all_bounds):
+        #     rays_o, rays_d = get_rays_shapenet(hwf, poses)
+        #     rays_o, rays_d = rays_o.reshape(-1, 3), rays_d.reshape(-1, 3)
+        #     self.all_rays_o.append(rays_o)
+        #     self.all_rays_d.append(rays_d)
+        #     self.num_rays += rays_d.shape[0]
+        #     self.idx_map.append([prev_idx, self.num_rays])
+        #     prev_idx = self.num_rays
+        #
+        # self.all_rays_o = torch.cat(self.all_rays_o)
+        # self.all_rays_d = torch.cat(self.all_rays_d)
 
-        prev_idx = 0
-        for (imgs, poses, hwf, bound) in zip(self.all_imgs, self.all_poses, self.all_hwf, self.all_bounds):
-            rays_o, rays_d = get_rays_shapenet(hwf, poses)
-            rays_o, rays_d = rays_o.reshape(-1, 3), rays_d.reshape(-1, 3)
-            self.all_rays_o.append(rays_o)
-            self.all_rays_d.append(rays_d)
-            self.num_rays += rays_d.shape[0]
-            self.idx_map.append([prev_idx, self.num_rays])
-            prev_idx = self.num_rays
-
-        self.all_rays_o = torch.cat(self.all_rays_o)
-        self.all_rays_d = torch.cat(self.all_rays_d)
-
-    def look_up_idx(self, idx):
-        for i in range(len(self.idx_map)):
-            min,max =self.idx_map[i][0], self.idx_map[i][1]
-            if idx >= min and idx < max:
-                return i
+    # def look_up_idx(self, idx):
+    #     for i in range(len(self.idx_map)):
+    #         min,max =self.idx_map[i][0], self.idx_map[i][1]
+    #         if idx >= min and idx < max:
+    #             return i
 
     def __getitem__(self, idx):
-        img_idx = self.look_up_idx(idx)
+        # img_idx = self.look_up_idx(idx)
 
         return {
-            "imgs": self.all_imgs[img_idx],
-            "poses": self.all_poses[img_idx],
-            "hwf":self.all_hwf[img_idx],
-            "bound":self.all_bounds[img_idx],
-            "rays_o":self.all_rays_o[idx],
-            "rays_d":self.all_rays_d[idx]
+            "imgs": self.all_imgs[idx],
+            "poses": self.all_poses[idx],
+            "hwf":self.all_hwf[idx],
+            "bound":self.all_bounds[idx],
         }
 
     def __len__(self):
-        return self.num_rays
+        return len(self.all_imgs)
 
 
 def build_shapenetV2(args, image_set, dataset_root, splits_path, num_views):

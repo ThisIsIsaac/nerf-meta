@@ -69,7 +69,8 @@ def train_meta(args, nerf_model, gen_model, gen_optim, data_loader, device):
         # Train weight generator
         gen_optim.zero_grad()
         nerf_model_copy = copy.deepcopy(nerf_model) #! copy meta model initialized weights
-        nerf_model_copy = set_grad(nerf_model_copy, False)     #! then turn gradient off
+        nerf_model_copy = set_grad(nerf_model_copy, False)  #! then turn gradient off
+        wandb.watch(nerf_model_copy, log="all", log_freq=10)
         weight_res = gen_model(imgs)
         add_weight_res(nerf_model_copy, weight_res, hidden_features=args.hidden_features, out_features=args.out_features)
         indices = torch.randint(num_rays, size=[args.train_batchsize])
@@ -144,11 +145,12 @@ def val_meta(args, nerf_model, gen_model, val_loader, device):
         imgs, poses, hwf, bound = imgs.to(device), poses.to(device), hwf.to(device), bound.to(device)
         imgs, poses, hwf, bound = imgs.squeeze(), poses.squeeze(), hwf.squeeze(), bound.squeeze()
 
-        rays_o, rays_d = get_rays_shapenet(hwf, poses)
-        rays_o, rays_d = rays_o.reshape(-1, 3), rays_d.reshape(-1, 3)
-        num_rays = rays_d.shape[0]
+
         tto_imgs, test_imgs = torch.split(imgs, [args.tto_views, args.test_views], dim=0)
         tto_poses, test_poses = torch.split(poses, [args.tto_views, args.test_views], dim=0)
+        rays_o, rays_d = get_rays_shapenet(hwf, tto_poses)
+        rays_o, rays_d = rays_o.reshape(-1, 3), rays_d.reshape(-1, 3)
+        num_rays = rays_d.shape[0]
 
         tto_pixels = tto_imgs.reshape(-1, 3)
         # Add weight residual
@@ -156,7 +158,7 @@ def val_meta(args, nerf_model, gen_model, val_loader, device):
         val_model = set_grad(val_model, False)
 
         # val_model_copy = copy.deepcopy(nerf_model.detach()) #! copy and detach the original meta model so gradient doesn't flow to the initialized weights
-        with torch.no_grad:
+        with torch.no_grad():
             weight_res = gen_model(imgs)
             val_model = add_weight_res(val_model, weight_res, hidden_features=args.hidden_features, out_features=args.out_features)
             indices = torch.randint(num_rays, size=[args.train_batchsize])
@@ -243,9 +245,7 @@ def main():
         print("must provide path to metaNeRF initial weights")
         raise ValueError()
 
-    #! Delete me
-    test(args, nerf_model=nerf_model, gen_model=gen_model)
-
+    wandb.watch(gen_model, log="all", log_freq=100)
     print("starting to train...")
     for epoch in range(1, args.meta_epochs+1):
         if epoch > 1:
@@ -257,10 +257,9 @@ def main():
                 'nerf_model_state_dict': nerf_model.state_dict()
             }, ckpt_name)
             wandb.save(ckpt_name)
-            # args.weight_path = ckpt_name
 
         train_meta(args, nerf_model, gen_model, gen_optim, train_loader, device)
-        [val_psnr_0, val_psnr_fin] = val_meta(args, nerf_model, val_loader, device)
+        [val_psnr_0, val_psnr_fin] = val_meta(args, nerf_model, gen_model, val_loader, device)
 
         print(f"Epoch: {epoch}, val_psnr_0: {val_psnr_0:0.3f}")
         wandb.log({"epoch":epoch, "val_psnr_0": val_psnr_0})
