@@ -81,8 +81,8 @@ def test(args, nerf_model=None, gen_model=None):
     # model.to(device)
     # wandb.save(args.weight_path)
     nerf_state = copy.deepcopy(test_nerf_model.state_dict())
-
-    savedir = Path(args.savedir)
+    savedir = args.savedir
+    # savedir = Path(args.savedir)
     savedir.mkdir(exist_ok=True)
     
     test_psnrs = []

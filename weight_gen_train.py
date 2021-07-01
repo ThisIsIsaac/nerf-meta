@@ -16,8 +16,11 @@ pretty.install()
 from rich import traceback
 traceback.install()
 from utils.shape_video import create_360_video
+from pathlib import Path
 
-def inner_loop(args, nerf_model, nerf_optim, pixels, imgs, rays_o, rays_d, poses, bound, hwf, num_samples, raybatch_size, inner_steps):
+def inner_loop(args, nerf_model, nerf_optim, pixels, imgs, rays_o, rays_d,
+               poses, bound, hwf, num_samples, raybatch_size, inner_steps,
+               device, idx, log_round=False, setup="train"):
     """
     train the inner model for a specified number of iterations
     """
@@ -43,17 +46,17 @@ def inner_loop(args, nerf_model, nerf_optim, pixels, imgs, rays_o, rays_d, poses
         loss.backward()
         nerf_optim.step()
 
-        if step % args.tto_log_steps == 0 and step > 0:
+        if log_round and step % args.tto_log_steps == 0 and step > 0:
             with torch.no_grad():
-                scene_psnr = report_result(args, nerf_model, imgs,
+                scene_psnr = report_result(nerf_model, imgs,
                                            poses, hwf,
-                                           bound)
-                wandb.log({"val/scene_psnr_post_res": scene_psnr})
+                                           bound, num_samples, raybatch_size)
+                wandb.log({setup + "/scene_psnr_post_res": scene_psnr})
 
                 vid_frames = create_360_video(args, nerf_model, hwf, bound,
                                               device,
                                                i, args.savedir)
-                wandb.log({"val/vid_post_res": wandb.Video(
+                wandb.log({setup + "/vid_post_res": wandb.Video(
                     vid_frames.transpose(0, 3, 1, 2), fps=30,
                     format="mp4")})
 
@@ -65,7 +68,14 @@ def train_meta(args, nerf_model, gen_model, gen_optim, data_loader, device):
     """
     gen_model.train()
     gen_model.requires_grad=True
-    for batch in data_loader:
+
+
+    for idx, batch in enumerate(data_loader):
+
+        log_round=False
+        if idx % args.log_interval == 0:
+            log_round = True
+
         imgs = batch["imgs"]
         poses = batch["poses"]
         hwf = batch["hwf"]
@@ -84,7 +94,7 @@ def train_meta(args, nerf_model, gen_model, gen_optim, data_loader, device):
         gen_optim.zero_grad()
         nerf_model_copy = copy.deepcopy(nerf_model) #! copy meta model initialized weights
         nerf_model_copy = set_grad(nerf_model_copy, False)  #! then turn gradient off
-        wandb.watch(nerf_model_copy, log="all", log_freq=10)
+        wandb.watch(nerf_model_copy, log="all", log_freq=100)
         weight_res = gen_model(imgs)
         add_weight_res(nerf_model_copy, weight_res, hidden_features=args.hidden_features, out_features=args.out_features)
         indices = torch.randint(num_rays, size=[args.train_batchsize])
@@ -103,11 +113,9 @@ def train_meta(args, nerf_model, gen_model, gen_optim, data_loader, device):
         inner_nerf_model_copy.train()
         nerf_optim = torch.optim.SGD(inner_nerf_model_copy.parameters(), args.inner_lr)
 
-
-
         inner_loop(args, inner_nerf_model_copy, nerf_optim, pixels, imgs,
                     rays_o, rays_d, poses, bound, hwf, args.num_samples,
-                    args.train_batchsize, args.inner_steps)
+                    args.train_batchsize, args.inner_steps, device=device, idx=idx, log_round=log_round, setup="train")
 
 
 def report_result(model, imgs, poses, hwf, bound, num_samples, raybatch_size):
@@ -121,13 +129,13 @@ def report_result(model, imgs, poses, hwf, bound, num_samples, raybatch_size):
         rays_o, rays_d = rays_o.reshape(-1, 3), rays_d.reshape(-1, 3)
         t_vals, xyz = sample_points(rays_o, rays_d, bound[0], bound[1],
                                     num_samples, perturb=False)
-        
+
         synth = []
         num_rays = rays_d.shape[0]
         with torch.no_grad():
             for i in range(0, num_rays, raybatch_size):
                 rgbs_batch, sigmas_batch = model(xyz[i:i+raybatch_size])
-                color_batch = volume_render(rgbs_batch, sigmas_batch, 
+                color_batch = volume_render(rgbs_batch, sigmas_batch,
                                             t_vals[i:i+raybatch_size],
                                             white_bkgd=True)
                 synth.append(color_batch)
@@ -135,7 +143,7 @@ def report_result(model, imgs, poses, hwf, bound, num_samples, raybatch_size):
             error = F.mse_loss(img, synth)
             psnr = -10*torch.log10(error)
             view_psnrs.append(psnr)
-    
+
     scene_psnr = torch.stack(view_psnrs).mean()
     return scene_psnr
 
@@ -185,9 +193,10 @@ def val_meta(args, nerf_model, gen_model, val_loader, device):
             colors = volume_render(rgbs, sigmas, t_vals, white_bkgd=True)
             val_loss = F.mse_loss(colors, pixelbatch)
 
-        scene_psnr = report_result(args, val_model, test_imgs,
-                                   test_poses, hwf,
-                                   bound)
+
+        scene_psnr = report_result(nerf_model, imgs,
+                                           poses, hwf,
+                                           bound, args.num_samples, args.test_batchsize)
         wandb.log({"val/scene_psnr_post_res": scene_psnr})
 
         vid_frames = create_360_video(args, val_model, hwf, bound,
@@ -204,7 +213,9 @@ def val_meta(args, nerf_model, gen_model, val_loader, device):
                                     args.num_samples, args.test_batchsize)
 
         inner_loop(args, inner_val_model, val_optim, tto_pixels, tto_imgs, rays_o,
-                    rays_d, tto_poses, bound, hwf, args.num_samples, args.tto_batchsize, args.tto_steps)
+                    rays_d, tto_poses, bound, hwf, args.num_samples,
+                   args.tto_batchsize, args.tto_steps,
+                   device=device, idx=idx, log_round=True, setup="val")
         
         scene_psnr_fin = report_result(inner_val_model, test_imgs, test_poses, hwf, bound,
                                     args.num_samples, args.test_batchsize)
@@ -252,6 +263,10 @@ def main():
     nerf_model = build_nerf(args)
     nerf_model.to(device)
     gen_optim = torch.optim.Adam(gen_model.parameters(), lr=args.meta_lr)
+
+    print("Training set: " + str(len(train_loader)) + " images" )
+    print("Val set: " + str(len(val_loader)) + " images")
+    args.savedir = Path(args.savedir)
 
     if args.weight_path is not None:
         checkpoint = torch.load(args.weight_path, map_location=device)
