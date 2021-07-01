@@ -20,7 +20,7 @@ from pathlib import Path
 
 def inner_loop(args, nerf_model, nerf_optim, pixels, imgs, rays_o, rays_d,
                poses, bound, hwf, num_samples, raybatch_size, inner_steps,
-               device, idx, log_round=False, setup="train"):
+               device, idx, step, log_round=False, setup="train"):
     """
     train the inner model for a specified number of iterations
     """
@@ -32,7 +32,7 @@ def inner_loop(args, nerf_model, nerf_optim, pixels, imgs, rays_o, rays_d,
     # rays_o, rays_d = rays_o.reshape(-1, 3), rays_d.reshape(-1, 3)
 
     num_rays = rays_d.shape[0]
-    for step in range(inner_steps):
+    for i in range(inner_steps):
         indices = torch.randint(num_rays, size=[raybatch_size])
         raybatch_o, raybatch_d = rays_o[indices], rays_d[indices]
         pixelbatch = pixels[indices] 
@@ -46,22 +46,34 @@ def inner_loop(args, nerf_model, nerf_optim, pixels, imgs, rays_o, rays_d,
         loss.backward()
         nerf_optim.step()
 
-        if log_round and step % args.tto_log_steps == 0 and step > 0:
+        if log_round and i % args.tto_log_steps == 0 and i > 0:
             with torch.no_grad():
                 scene_psnr = report_result(nerf_model, imgs,
                                            poses, hwf,
                                            bound, num_samples, raybatch_size)
-                wandb.log({setup + "/scene_psnr_post_res": scene_psnr})
+                wandb.log({setup + "/scene_psnr_post_res": scene_psnr}, step=step)
 
                 vid_frames = create_360_video(args, nerf_model, hwf, bound,
                                               device,
-                                               i, args.savedir)
+                                               idx, args.savedir)
                 wandb.log({setup + "/vid_post_res": wandb.Video(
                     vid_frames.transpose(0, 3, 1, 2), fps=30,
-                    format="mp4")})
+                    format="mp4")}, step=step)
 
+    if log_round:
+        with torch.no_grad():
+            scene_psnr = report_result(nerf_model, imgs,
+                                       poses, hwf,
+                                       bound, num_samples, raybatch_size)
+            wandb.log({setup + "/scene_psnr res + inner steps": scene_psnr}, step=step)
 
-def train_meta(args, nerf_model, gen_model, gen_optim, data_loader, device):
+            vid_frames = create_360_video(args, nerf_model, hwf, bound,
+                                          device,
+                                          idx, args.savedir)
+            wandb.log({setup + "/vid res + inner steps": wandb.Video(
+                vid_frames.transpose(0, 3, 1, 2), fps=30,
+                format="mp4")}, step=step)
+def train_meta(args, epoch_idx, nerf_model, gen_model, gen_optim, data_loader, device):
     """
     train the meta_model for one epoch using reptile meta learning
     https://arxiv.org/abs/1803.02999
@@ -69,7 +81,7 @@ def train_meta(args, nerf_model, gen_model, gen_optim, data_loader, device):
     gen_model.train()
     gen_model.requires_grad=True
 
-
+    step = (epoch_idx-1)*len(data_loader)
     for idx, batch in enumerate(data_loader):
 
         log_round=False
@@ -115,8 +127,9 @@ def train_meta(args, nerf_model, gen_model, gen_optim, data_loader, device):
 
         inner_loop(args, inner_nerf_model_copy, nerf_optim, pixels, imgs,
                     rays_o, rays_d, poses, bound, hwf, args.num_samples,
-                    args.train_batchsize, args.inner_steps, device=device, idx=idx, log_round=log_round, setup="train")
-
+                    args.train_batchsize, args.inner_steps, step=step,
+                    device=device, idx=idx, log_round=log_round, setup="train")
+        step+=1
 
 def report_result(model, imgs, poses, hwf, bound, num_samples, raybatch_size):
     """
@@ -148,7 +161,7 @@ def report_result(model, imgs, poses, hwf, bound, num_samples, raybatch_size):
     return scene_psnr
 
 
-def val_meta(args, nerf_model, gen_model, val_loader, device):
+def val_meta(args, epoch_idx, nerf_model, gen_model, val_loader, device):
     """
     validate the meta trained model for few-shot view synthesis
     """
@@ -157,6 +170,7 @@ def val_meta(args, nerf_model, gen_model, val_loader, device):
     meta_trained_state = nerf_model.state_dict()
     val_model = copy.deepcopy(nerf_model)
 
+    step = (epoch_idx-1)*len(val_loader)
     val_psnrs_fin = []
     val_psnrs_0 = []
     for idx, batch in enumerate(val_loader):
@@ -197,14 +211,14 @@ def val_meta(args, nerf_model, gen_model, val_loader, device):
         scene_psnr = report_result(nerf_model, imgs,
                                            poses, hwf,
                                            bound, args.num_samples, args.test_batchsize)
-        wandb.log({"val/scene_psnr_post_res": scene_psnr})
+        wandb.log({"val/scene_psnr_post_res": scene_psnr},step=step)
 
         vid_frames = create_360_video(args, val_model, hwf, bound,
                                       device,
                                       idx + 1, args.savedir)
         wandb.log({"val/vid_post_res": wandb.Video(
             vid_frames.transpose(0, 3, 1, 2), fps=30,
-            format="mp4")})
+            format="mp4")}, step=step)
 
         inner_val_model = copy.deepcopy(val_model)
         inner_val_model = set_grad(inner_val_model, True)
@@ -214,13 +228,14 @@ def val_meta(args, nerf_model, gen_model, val_loader, device):
 
         inner_loop(args, inner_val_model, val_optim, tto_pixels, tto_imgs, rays_o,
                     rays_d, tto_poses, bound, hwf, args.num_samples,
-                   args.tto_batchsize, args.tto_steps,
+                   args.tto_batchsize, args.tto_steps, step=step,
                    device=device, idx=idx, log_round=True, setup="val")
         
         scene_psnr_fin = report_result(inner_val_model, test_imgs, test_poses, hwf, bound,
                                     args.num_samples, args.test_batchsize)
         val_psnrs_0.append(scene_psnr_0)
         val_psnrs_fin.append(scene_psnr_fin)
+        step+=1
 
     val_psnr_fin = torch.stack(val_psnrs_fin).mean()
     val_psnr_0 = torch.stack(val_psnrs_0).mean()
@@ -302,13 +317,13 @@ def main():
             }, ckpt_name)
             wandb.save(ckpt_name)
 
-        train_meta(args, nerf_model, gen_model, gen_optim, train_loader, device)
+        train_meta(args, epoch, nerf_model, gen_model, gen_optim, train_loader, device)
         [val_psnr_0, val_psnr_fin] = val_meta(args, nerf_model, gen_model, val_loader, device)
 
         print(f"Epoch: {epoch}, val_psnr_0: {val_psnr_0:0.3f} | val psnr fin: {val_psnr_fin:0.3f}")
-        wandb.log({"epoch":epoch, "val_psnr_0": val_psnr_0})
+        wandb.log({"val_psnr_0": val_psnr_0}, step=epoch)
 
-        wandb.log({"epoch":epoch, "val_psnr_fin": val_psnr_fin})
+        wandb.log({"val_psnr_fin": val_psnr_fin}, step=epoch)
     test(args, nerf_model=nerf_model, gen_model=gen_model)
 
 if __name__ == '__main__':
