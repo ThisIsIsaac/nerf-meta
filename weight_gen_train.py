@@ -318,7 +318,7 @@ def main():
             wandb.save(ckpt_name)
 
         train_meta(args, epoch, nerf_model, gen_model, gen_optim, train_loader, device)
-        [val_psnr_0, val_psnr_fin] = val_meta(args, nerf_model, gen_model, val_loader, device)
+        [val_psnr_0, val_psnr_fin] = val_meta(args, epoch, nerf_model, gen_model, val_loader, device)
 
         print(f"Epoch: {epoch}, val_psnr_0: {val_psnr_0:0.3f} | val psnr fin: {val_psnr_fin:0.3f}")
         wandb.log({"val_psnr_0": val_psnr_0}, step=epoch)
