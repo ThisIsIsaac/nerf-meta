@@ -15,9 +15,9 @@ from rich import pretty
 pretty.install()
 from rich import traceback
 traceback.install()
+from utils.shape_video import create_360_video
 
-
-def inner_loop(nerf_model, nerf_optim, pixels, rays_o, rays_d, bound, num_samples, raybatch_size, inner_steps):
+def inner_loop(args, nerf_model, nerf_optim, pixels, imgs, rays_o, rays_d, poses, bound, hwf, num_samples, raybatch_size, inner_steps):
     """
     train the inner model for a specified number of iterations
     """
@@ -42,6 +42,20 @@ def inner_loop(nerf_model, nerf_optim, pixels, rays_o, rays_d, bound, num_sample
         loss = F.mse_loss(colors, pixelbatch)
         loss.backward()
         nerf_optim.step()
+
+        if step % args.tto_log_steps == 0 and step > 0:
+            with torch.no_grad():
+                scene_psnr = report_result(args, nerf_model, imgs,
+                                           poses, hwf,
+                                           bound)
+                wandb.log({"val/scene_psnr_post_res": scene_psnr})
+
+                vid_frames = create_360_video(args, nerf_model, hwf, bound,
+                                              device,
+                                               i, args.savedir)
+                wandb.log({"val/vid_post_res": wandb.Video(
+                    vid_frames.transpose(0, 3, 1, 2), fps=30,
+                    format="mp4")})
 
 
 def train_meta(args, nerf_model, gen_model, gen_optim, data_loader, device):
@@ -90,8 +104,9 @@ def train_meta(args, nerf_model, gen_model, gen_optim, data_loader, device):
         nerf_optim = torch.optim.SGD(inner_nerf_model_copy.parameters(), args.inner_lr)
 
 
-        inner_loop(inner_nerf_model_copy, nerf_optim, pixels,
-                    rays_o, rays_d, bound, args.num_samples,
+
+        inner_loop(args, inner_nerf_model_copy, nerf_optim, pixels, imgs,
+                    rays_o, rays_d, poses, bound, hwf, args.num_samples,
                     args.train_batchsize, args.inner_steps)
 
 
@@ -136,7 +151,7 @@ def val_meta(args, nerf_model, gen_model, val_loader, device):
 
     val_psnrs_fin = []
     val_psnrs_0 = []
-    for batch in val_loader:
+    for idx, batch in enumerate(val_loader):
         imgs = batch["imgs"]
         poses = batch["poses"]
         hwf = batch["hwf"]
@@ -170,14 +185,26 @@ def val_meta(args, nerf_model, gen_model, val_loader, device):
             colors = volume_render(rgbs, sigmas, t_vals, white_bkgd=True)
             val_loss = F.mse_loss(colors, pixelbatch)
 
+        scene_psnr = report_result(args, val_model, test_imgs,
+                                   test_poses, hwf,
+                                   bound)
+        wandb.log({"val/scene_psnr_post_res": scene_psnr})
+
+        vid_frames = create_360_video(args, val_model, hwf, bound,
+                                      device,
+                                      idx + 1, args.savedir)
+        wandb.log({"val/vid_post_res": wandb.Video(
+            vid_frames.transpose(0, 3, 1, 2), fps=30,
+            format="mp4")})
+
         inner_val_model = copy.deepcopy(val_model)
         inner_val_model = set_grad(inner_val_model, True)
         val_optim = torch.optim.SGD(inner_val_model.parameters(), args.tto_lr)
         scene_psnr_0 = report_result(inner_val_model, test_imgs, test_poses, hwf, bound,
                                     args.num_samples, args.test_batchsize)
 
-        inner_loop(inner_val_model, val_optim, tto_pixels, rays_o,
-                    rays_d, bound, args.num_samples, args.tto_batchsize, args.tto_steps)
+        inner_loop(args, inner_val_model, val_optim, tto_pixels, tto_imgs, rays_o,
+                    rays_d, tto_poses, bound, hwf, args.num_samples, args.tto_batchsize, args.tto_steps)
         
         scene_psnr_fin = report_result(inner_val_model, test_imgs, test_poses, hwf, bound,
                                     args.num_samples, args.test_batchsize)

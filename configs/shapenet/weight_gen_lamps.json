@@ -22,6 +22,7 @@
     "tto_lr": 0.5,
     "tto_batchsize": 64,
     "tto_steps": 1000,
+    "tto_log_steps" : 1000,
 
     "test_views": 25,
     "test_batchsize": 4096,

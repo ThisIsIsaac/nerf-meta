@@ -129,36 +129,38 @@ def test(args, nerf_model=None, gen_model=None):
         nerf_optim = torch.optim.SGD(inner_val_model.parameters(), args.tto_lr)
 
         #! function body of "test_time_optimize"
-        tto_log_steps = 1000
+
         has_recorded_without_tto = False
 
         for step in range(args.tto_steps):
             #* log output on every iteration
-            if step % tto_log_steps == 0:
+            if step % args.tto_log_steps == 0:
                 if step == 0:
                     if has_recorded_without_tto == False:
-                        scene_psnr = report_result(args, inner_val_model, test_imgs, test_poses, hwf,
+                        with torch.no_grad():
+                            scene_psnr = report_result(args, inner_val_model, test_imgs, test_poses, hwf,
+                                                       bound)
+                            wandb.log({"test/scene_psnr_step_" + str(step): scene_psnr})
+
+                            vid_frames = create_360_video(args, inner_val_model, hwf, bound, device,
+                                                          idx + 1, savedir, step=step)
+                            wandb.log({"test/vid_step_" + str(step): wandb.Video(
+                                vid_frames.transpose(0, 3, 1, 2), fps=30, format="mp4")})
+                            has_recorded_without_tto = True
+
+                else:
+                    with torch.no_grad():
+                        scene_psnr = report_result(args, inner_val_model, test_imgs,
+                                                   test_poses, hwf,
                                                    bound)
                         wandb.log({"test/scene_psnr_step_" + str(step): scene_psnr})
 
-                        vid_frames = create_360_video(args, inner_val_model, hwf, bound, device,
+                        vid_frames = create_360_video(args, inner_val_model, hwf, bound,
+                                                      device,
                                                       idx + 1, savedir, step=step)
                         wandb.log({"test/vid_step_" + str(step): wandb.Video(
-                            vid_frames.transpose(0, 3, 1, 2), fps=30, format="mp4")})
-                        has_recorded_without_tto = True
-
-                else:
-                    scene_psnr = report_result(args, inner_val_model, test_imgs,
-                                               test_poses, hwf,
-                                               bound)
-                    wandb.log({"test/scene_psnr_step_" + str(step): scene_psnr})
-
-                    vid_frames = create_360_video(args, inner_val_model, hwf, bound,
-                                                  device,
-                                                  idx + 1, savedir, step=step)
-                    wandb.log({"test/vid_step_" + str(step): wandb.Video(
-                        vid_frames.transpose(0, 3, 1, 2), fps=30,
-                        format="mp4")})
+                            vid_frames.transpose(0, 3, 1, 2), fps=30,
+                            format="mp4")})
 
             indices = torch.randint(num_rays, size=[args.tto_batchsize])
             raybatch_o, raybatch_d = rays_o[indices], rays_d[indices]
@@ -175,12 +177,13 @@ def test(args, nerf_model=None, gen_model=None):
             nerf_optim.step()
 
         #* log output of the very last iteration
-        scene_psnr = report_result(args, inner_val_model, test_imgs, test_poses, hwf,
-                                   bound)
-        vid_frames = create_360_video(args, inner_val_model, hwf, bound, device, idx + 1,
-                                      savedir, step=args.tto_steps)
-        wandb.log({"test/vid_step_" + str(args.tto_steps): wandb.Video(
-            vid_frames.transpose(0, 3, 1, 2), fps=30, format="mp4")})
+        with torch.no_grad():
+            scene_psnr = report_result(args, inner_val_model, test_imgs, test_poses, hwf,
+                                       bound)
+            vid_frames = create_360_video(args, inner_val_model, hwf, bound, device, idx + 1,
+                                          savedir, step=args.tto_steps)
+            wandb.log({"test/vid_step_" + str(args.tto_steps): wandb.Video(
+                vid_frames.transpose(0, 3, 1, 2), fps=30, format="mp4")})
 
         print(f"scene {idx+1}, psnr:{scene_psnr:.3f}, video created")
         wandb.log({"test/scene_psnr_" + str(args.tto_steps): scene_psnr})

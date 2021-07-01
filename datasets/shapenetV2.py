@@ -83,7 +83,6 @@ class ShapenetDatasetV2(Dataset):
             self.all_poses.append(poses)
             self.all_hwf.append(hwf)
             self.all_bounds.append(bound)
-            break
 
         # self.all_rays_o = []
         # self.all_rays_d = []
