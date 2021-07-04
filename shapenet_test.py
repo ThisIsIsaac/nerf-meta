@@ -106,12 +106,12 @@ def test(args):
         rays_o, rays_d = rays_o.reshape(-1, 3), rays_d.reshape(-1, 3)
 
         num_rays = rays_d.shape[0]
-        tto_log_steps = 1000
+
         has_recorded_without_tto = False
 
         for step in range(args.tto_steps):
             #* log output on every iteration
-            if step % tto_log_steps == 0:
+            if step % args.tto_log_step == 0:
                 if step == 0:
                     if has_recorded_without_tto == False:
                         scene_psnr = report_result(args, model, test_imgs, test_poses, hwf,

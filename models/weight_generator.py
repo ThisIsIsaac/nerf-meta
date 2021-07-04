@@ -19,8 +19,6 @@ class WeightGenerator(nn.Module):
         self.hidden_features = args.hidden_features
         self.hidden_layers = args.hidden_layers
         self.out_features = args.out_features
-
-        # G_out_features = (args.hidden_features * args.hidden_layers) * (args.hidden_features*((args.hidden_layers-1) + self.out_features))
         self.gen = nn.Sequential(nn.Linear(1472,args.hidden_layers), nn.ReLU())
 
         # Image preprocessing, normalization for the pretrained resnet
@@ -44,13 +42,13 @@ class WeightGenerator(nn.Module):
             for i in range(len(self.feature_extractor)):
                 feat = self.feature_extractor[i](feat)
                 if i in self.extraction_layers:
-                    feat = F.interpolate(feat, size=[64, 64], mode="bilinear")
+                    feat = F.interpolate(feat, size=[64, 64], mode="bilinear", align_corners=True)
                     features.append(feat)
         features = torch.cat(features, dim=1)
         features = features.permute(0, 2, 3, 1)
         weight_res = self.gen(features)
         weight_res = weight_res.permute(0, 3, 1, 2)
-        weight_res = F.interpolate(weight_res, size=[256, 256],mode="bilinear")
+        weight_res = F.interpolate(weight_res, size=[256, 256],mode="bilinear", align_corners=True)
         return weight_res
 
 def add_weight_res(nerf, res, hidden_features=256, out_features=4):
@@ -69,21 +67,8 @@ def add_weight_res(nerf, res, hidden_features=256, out_features=4):
         l = i*2+1
         weight_shape = nerf.net[l].weight.shape
         layer_res = torch.unsqueeze(res[:, i, :, :], 1)
-        layer_res = F.interpolate(layer_res, weight_shape, mode="bilinear")
+        layer_res = F.interpolate(layer_res, weight_shape, mode="bilinear", align_corners=True)
         layer_res = torch.squeeze(torch.mean(layer_res, dim=0))
         nerf.net[l].weight.add_(layer_res)
 
-
-
-    # for i in range(layers_before_fc-1):
-    #     #* multiply 2 to layer index so we skip ReLU layers
-    #
-    #     # res_std
-    #     # ratio = 1/10
-    #     res = (weight_std/res)
-    #     nerf.net[layers_before_fc + 2*i].weight +=
-
-    #* final linear layer
-    # weight_std = torch.std(nerf.net[-1].weight, 1)
-    # nerf.net[-1].weight += weight_std * res[:, res_H-hidden_features:, res_W-out_features:]
     return nerf

@@ -8,6 +8,8 @@
     "hidden_layers": 5,
     "hidden_features": 256,
 
+
+    "encoding_method": "positional_encoding",
     "train_views": 25,
     "meta_epochs": 45,
     "meta_lr": 5e-5,
@@ -20,6 +22,7 @@
     "tto_lr": 0.5,
     "tto_batchsize": 64,
     "tto_steps": 2000,
+    "tto_log_step": 500,
 
     "test_views": 25,
     "test_batchsize": 4096,

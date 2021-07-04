@@ -11,6 +11,7 @@
     "hidden_features": 256,
     "out_features": 4,
 
+    "encoding_method": "positional_encoding",
     "train_views": 25,
     "meta_epochs": 15,
     "meta_lr": 5e-5,
