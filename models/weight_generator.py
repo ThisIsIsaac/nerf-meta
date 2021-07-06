@@ -11,7 +11,7 @@ class WeightGenerator(nn.Module):
         # source: https://github.com/yunjey/pytorch-tutorial/blob/0500d3df5a2a8080ccfccbc00aca0eacc21818db/tutorials/03-advanced/image_captioning/model.py#L9
         super(WeightGenerator, self).__init__()
         feature_extractor = models.vgg16_bn(pretrained=True)
-        feature_extractor.requires_grad = False
+        feature_extractor.requires_grad_(False)
         feature_extractor.eval()
         self.feature_extractor = list(feature_extractor.children())[:-2][0]
         self.extraction_layers = [5, 12, 22, 32, 42]
@@ -51,12 +51,13 @@ class WeightGenerator(nn.Module):
         weight_res = F.interpolate(weight_res, size=[256, 256],mode="bilinear", align_corners=True)
         return weight_res
 
-def add_weight_res(nerf, res, hidden_features=256, out_features=4):
+def add_weight_res(nerf, res, hidden_features=256, out_features=4, debug=False):
     layers_before_fc = 3
     _, _, res_H, res_W = res.shape
 
 
 
+    layer_res_list = []
     num_layers = (len(nerf.net)-layers_before_fc)//2
     for i in range(num_layers):
         # weight_std = torch.std(nerf.net[layers_before_fc + 2 * i].weight, 0)
@@ -69,6 +70,9 @@ def add_weight_res(nerf, res, hidden_features=256, out_features=4):
         layer_res = torch.unsqueeze(res[:, i, :, :], 1)
         layer_res = F.interpolate(layer_res, weight_shape, mode="bilinear", align_corners=True)
         layer_res = torch.squeeze(torch.mean(layer_res, dim=0))
-        nerf.net[l].weight.add_(layer_res)
+        nerf.net[l].weight.data += layer_res
+        layer_res_list.append(layer_res)
+    if debug:
+        return nerf, layer_res_list
 
     return nerf

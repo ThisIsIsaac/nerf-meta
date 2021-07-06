@@ -130,10 +130,8 @@ def build_nerf(args):
     return model
 
 def set_grad(nerf, bool):
-    nerf.requires_grad=bool
-    for l in nerf.net:
-        if hasattr(l, "weight"):
-            l.weight.requires_grad=bool
-        if hasattr(l, "bias"):
-            l.bias.requires_grad = bool
+    nerf.requires_grad_(bool)
+    nerf.net.requires_grad_(bool)
+    for param in nerf.net.parameters():
+        param.requires_grad = bool
     return nerf

@@ -17,15 +17,30 @@ from rich import traceback
 traceback.install()
 from utils.shape_video import create_360_video
 from pathlib import Path
+from torchvision.utils import make_grid
 
 def inner_loop(args, nerf_model, nerf_optim, pixels, imgs, rays_o, rays_d,
                poses, bound, hwf, num_samples, raybatch_size, inner_steps,
-               device, idx, step, log_round=False, setup="train"):
+               device, idx, step, log_round=False, setup="train/"):
     """
     train the inner model for a specified number of iterations
     """
     num_rays = rays_d.shape[0]
-    for i in range(inner_steps):
+    for i in range(1, inner_steps+1):
+        if log_round and ((i % args.tto_log_steps == 0) or (i == inner_steps) or (i==1)):
+            with torch.no_grad():
+                scene_psnr = report_result(nerf_model, imgs,
+                                           poses, hwf,
+                                           bound, num_samples, raybatch_size)
+
+                vid_frames = create_360_video(args, nerf_model, hwf, bound,
+                                              device,
+                                               idx, args.savedir)
+                wandb.log({setup + "scene_psnr res + tto_step=" + str(i): scene_psnr,
+                            setup + "vid_post res + tto_step=" + str(i): wandb.Video(
+                            vid_frames.transpose(0, 3, 1, 2), fps=30,
+                            format="mp4")}) #, step=step
+
         indices = torch.randint(num_rays, size=[raybatch_size])
         raybatch_o, raybatch_d = rays_o[indices], rays_d[indices]
         pixelbatch = pixels[indices] 
@@ -39,21 +54,9 @@ def inner_loop(args, nerf_model, nerf_optim, pixels, imgs, rays_o, rays_d,
         loss.backward()
         nerf_optim.step()
 
-        if log_round and ((i % args.tto_log_steps == 0 and i > 0) or (i + 1 == inner_steps)):
-            with torch.no_grad():
-                scene_psnr = report_result(nerf_model, imgs,
-                                           poses, hwf,
-                                           bound, num_samples, raybatch_size)
-                wandb.log({setup + "/scene_psnr res + tto_step=" + str(i): scene_psnr}, step=step)
 
-                vid_frames = create_360_video(args, nerf_model, hwf, bound,
-                                              device,
-                                               idx, args.savedir)
-                wandb.log({setup + "/vid_post res + tto_step=" + str(i): wandb.Video(
-                    vid_frames.transpose(0, 3, 1, 2), fps=30,
-                    format="mp4")}, step=step)
 
-def train_meta(args, epoch_idx, nerf_model, gen_model, gen_optim, data_loader, device):
+def train_meta(args, epoch_idx, nerf_model, gen_model, gen_optim, data_loader, device, ref_state_dict=None):
     """
     train the meta_model for one epoch using reptile meta learning
     https://arxiv.org/abs/1803.02999
@@ -63,10 +66,6 @@ def train_meta(args, epoch_idx, nerf_model, gen_model, gen_optim, data_loader, d
 
     step = (epoch_idx-1)*len(data_loader)
     for idx, batch in enumerate(data_loader):
-
-        log_round=False
-        if idx % args.log_interval == 0:
-            log_round = True
 
         imgs = batch["imgs"]
         poses = batch["poses"]
@@ -84,19 +83,34 @@ def train_meta(args, epoch_idx, nerf_model, gen_model, gen_optim, data_loader, d
         gen_optim.zero_grad()
         nerf_model_copy = copy.deepcopy(nerf_model) #! copy meta model initialized weights
         nerf_model_copy = set_grad(nerf_model_copy, False)  #! then turn gradient off
-        wandb.watch(nerf_model_copy, log="all", log_freq=100)
+        # imgs.requires_grad_(True)
+
         weight_res = gen_model(imgs)
-        add_weight_res(nerf_model_copy, weight_res, hidden_features=args.hidden_features, out_features=args.out_features)
+        _, layer_res_list = add_weight_res(nerf_model_copy, weight_res,debug=True, hidden_features=args.hidden_features, out_features=args.out_features)
         indices = torch.randint(num_rays, size=[args.train_batchsize])
         raybatch_o, raybatch_d = rays_o[indices], rays_d[indices]
         pixelbatch = pixels[indices]
         t_vals, xyz = sample_points(raybatch_o, raybatch_d, bound[0], bound[1],
                                     args.num_samples, perturb=True)
+        # xyz.requires_grad_(True)
         rgbs, sigmas = nerf_model_copy(xyz)
         colors = volume_render(rgbs, sigmas, t_vals, white_bkgd=True)
         loss = F.mse_loss(colors, pixelbatch)
+        loss.requires_grad_(True)
         loss.backward()
         gen_optim.step()
+
+        log_round=False
+        if step % args.log_interval == 0:
+            log_round = True
+            wandb.log({"train/mse_loss":float(loss)}) # , step=step
+
+        if ref_state_dict is not None:
+            is_equal = check_frozen(nerf_model_copy.state_dict(), ref_state_dict, layer_res_list)
+            if not is_equal:
+                print("Error: meta-nerf weight was updated during generator training")
+                raise ValueError()
+
 
         inner_nerf_model_copy = copy.deepcopy(nerf_model_copy)
         inner_nerf_model_copy = set_grad(inner_nerf_model_copy, True)
@@ -106,7 +120,7 @@ def train_meta(args, epoch_idx, nerf_model, gen_model, gen_optim, data_loader, d
         inner_loop(args, inner_nerf_model_copy, nerf_optim, pixels, imgs,
                     rays_o, rays_d, poses, bound, hwf, args.num_samples,
                     args.train_batchsize, args.inner_steps, step=step,
-                    device=device, idx=idx, log_round=log_round, setup="train")
+                    device=device, idx=idx, log_round=log_round, setup="train/")
         step+=1
 
 def report_result(model, imgs, poses, hwf, bound, num_samples, raybatch_size):
@@ -162,6 +176,11 @@ def val_meta(args, epoch_idx, nerf_model, gen_model, val_loader, device):
 
         tto_imgs, test_imgs = torch.split(imgs, [args.tto_views, args.test_views], dim=0)
         tto_poses, test_poses = torch.split(poses, [args.tto_views, args.test_views], dim=0)
+
+        wandb.log({"val/val_tto_views": wandb.Image(make_grid(tto_imgs.permute(0, 3, 1, 2))),
+                 "val/val_test_views": wandb.Image(make_grid(test_imgs.permute(0, 3, 1, 2)))},
+                  ) #step=step
+
         rays_o, rays_d = get_rays_shapenet(hwf, tto_poses)
         rays_o, rays_d = rays_o.reshape(-1, 3), rays_d.reshape(-1, 3)
         num_rays = rays_d.shape[0]
@@ -187,16 +206,15 @@ def val_meta(args, epoch_idx, nerf_model, gen_model, val_loader, device):
         scene_psnr = report_result(nerf_model, imgs,
                                            poses, hwf,
                                            bound, args.num_samples, args.test_batchsize)
-        wandb.log({"val/tto_views": tto_imgs}, step=step)
-        wandb.log({"val/test_views": test_imgs}, step=step)
-        wandb.log({"val/scene_psnr res": scene_psnr},step=step)
+        wandb.log({"val/val_mse_loss": val_loss,
+                    "val/val_scene_psnr res": scene_psnr}) #,step=step
 
-        vid_frames = create_360_video(args, val_model, hwf, bound,
-                                      device,
-                                      idx + 1, args.savedir)
-        wandb.log({"val/vid res": wandb.Video(
-            vid_frames.transpose(0, 3, 1, 2), fps=30,
-            format="mp4")}, step=step)
+        # vid_frames = create_360_video(args, val_model, hwf, bound,
+        #                               device,
+        #                               idx + 1, args.savedir)
+        # wandb.log({"val/vid res": wandb.Video(
+        #     vid_frames.transpose(0, 3, 1, 2), fps=30,
+        #     format="mp4")}, step=step)
 
         inner_val_model = copy.deepcopy(val_model)
         inner_val_model = set_grad(inner_val_model, True)
@@ -207,7 +225,7 @@ def val_meta(args, epoch_idx, nerf_model, gen_model, val_loader, device):
         inner_loop(args, inner_val_model, val_optim, tto_pixels, tto_imgs, rays_o,
                     rays_d, tto_poses, bound, hwf, args.num_samples,
                    args.tto_batchsize, args.tto_steps, step=step,
-                   device=device, idx=idx, log_round=True, setup="val")
+                   device=device, idx=idx, log_round=True, setup="val/val_")
         
         scene_psnr_fin = report_result(inner_val_model, test_imgs, test_poses, hwf, bound,
                                     args.num_samples, args.test_batchsize)
@@ -218,6 +236,31 @@ def val_meta(args, epoch_idx, nerf_model, gen_model, val_loader, device):
     val_psnr_fin = torch.stack(val_psnrs_fin).mean()
     val_psnr_0 = torch.stack(val_psnrs_0).mean()
     return [val_psnr_0,val_psnr_fin]
+
+def check_frozen(ckpt, ref_ckpt, layer_res_list):
+    eps = 0.0000001
+    i=0
+    for key in ckpt.keys():
+        if ".0." in key:
+            continue
+        w = ckpt[key]
+        ref_w = ref_ckpt[key]
+        diff = w - ref_w
+
+        if "weight" in key:
+            max_diff = (diff-layer_res_list[i]).abs().max()
+            i += 1
+
+        if "bias" in key:
+            max_diff = diff.abs().max()
+
+        if max_diff > eps:
+            print(key + " was not the same")
+            print("max diff: " + str(max_diff))
+            return False
+        if i == len(layer_res_list):
+            break
+    return True
 
 
 def main():
@@ -267,31 +310,33 @@ def main():
         gen_optim.load_state_dict(checkpoint['gen_optim_state_dict'])
 
     if args.nerf_weight_path is not None:
-        checkpoint = torch.load(args.nerf_weight_path, map_location=device)
+        nerf_checkpoint = torch.load(args.nerf_weight_path, map_location=device)
 
-        if "nerf_model_state_dict" in checkpoint.keys():
-            nerf_model.load_state_dict(checkpoint["nerf_model_state_dict"])
-        elif "meta_model_state_dict" in checkpoint.keys():
-            nerf_model.load_state_dict(checkpoint["meta_model_state_dict"])
+        if "nerf_model_state_dict" in nerf_checkpoint.keys():
+            nerf_checkpoint = nerf_checkpoint["nerf_model_state_dict"]
+
+        elif "meta_model_state_dict" in nerf_checkpoint.keys():
+            nerf_checkpoint = nerf_checkpoint["meta_model_state_dict"]
         else:
             print("checkpoint doesn't contain meta-nerf initialized weights")
             raise ValueError()
+        nerf_model.load_state_dict(nerf_checkpoint)
     else:
         print("must provide path to metaNeRF initial weights")
         raise ValueError()
 
-    wandb.watch(gen_model, log="all", log_freq=100)
+    wandb.watch(gen_model.gen, log="all", log_freq=100)
     print("starting to train...")
     for epoch in range(1, args.meta_epochs+1):
         # [val_psnr_0, val_psnr_fin] = val_meta(args, epoch, nerf_model,
         #                                       gen_model, val_loader, device)
 
-        train_meta(args, epoch, nerf_model, gen_model, gen_optim, train_loader, device)
+        train_meta(args, epoch, nerf_model, gen_model, gen_optim, train_loader, device, ref_state_dict=nerf_checkpoint)
         [val_psnr_0, val_psnr_fin] = val_meta(args, epoch, nerf_model, gen_model, val_loader, device)
 
         print(f"Epoch: {epoch}, val_psnr_0: {val_psnr_0:0.3f} | val psnr fin: {val_psnr_fin:0.3f}")
-        wandb.log({"val_psnr_0": val_psnr_0}, step=epoch)
-        wandb.log({"val_psnr_fin": val_psnr_fin}, step=epoch)
+        wandb.log({"val_psnr_0": val_psnr_0}) #, step=epoch
+        wandb.log({"val_psnr_fin": val_psnr_fin}) #step=epoch
 
         ckpt_name = "./" + args.exp_name + "_epoch" + str(epoch) + ".pth"
         torch.save({

@@ -103,8 +103,8 @@ def test(args, nerf_model=None, gen_model=None, epoch_idx=1):
         num_rays = rays_d.shape[0]
 
 
-        wandb.log({'test/test_time_opt_imgs': wandb.Image(torch.squeeze(torch.transpose(tto_imgs, 0, 3)))},step=wandb_step)
-        wandb.log({'test/test_time_input_imgs': wandb.Image(test_imgs.permute(0, 3, 1, 2))},step=wandb_step)
+        wandb.log({'test/test_time_opt_imgs': wandb.Image(torch.squeeze(torch.transpose(tto_imgs, 0, 3)))}) #,step=wandb_step
+        wandb.log({'test/test_time_input_imgs': wandb.Image(test_imgs.permute(0, 3, 1, 2))}) #,step=wandb_step
 
     
         test_nerf_model.load_state_dict(nerf_state)
@@ -141,12 +141,12 @@ def test(args, nerf_model=None, gen_model=None, epoch_idx=1):
                         with torch.no_grad():
                             scene_psnr = report_result(args, inner_val_model, test_imgs, test_poses, hwf,
                                                        bound)
-                            wandb.log({"test/scene_psnr_step_" + str(step): scene_psnr}, step=wandb_step)
+                            wandb.log({"test/test_scene_psnr_step_" + str(step): scene_psnr}) #, step=wandb_step
 
                             vid_frames = create_360_video(args, inner_val_model, hwf, bound, device,
-                                                          idx + 1, savedir, step=step)
-                            wandb.log({"test/vid_step_" + str(step): wandb.Video(
-                                vid_frames.transpose(0, 3, 1, 2), fps=30, format="mp4")}, step=wandb_step)
+                                                          idx + 1, savedir) #, step=step
+                            wandb.log({"test/test_vid_step_" + str(step): wandb.Video(
+                                vid_frames.transpose(0, 3, 1, 2), fps=30, format="mp4")}) #, step=wandb_step
                             has_recorded_without_tto = True
 
                 else:
@@ -154,14 +154,14 @@ def test(args, nerf_model=None, gen_model=None, epoch_idx=1):
                         scene_psnr = report_result(args, inner_val_model, test_imgs,
                                                    test_poses, hwf,
                                                    bound)
-                        wandb.log({"test/scene_psnr_step_" + str(step): scene_psnr}, step=wandb_step)
+                        wandb.log({"test/test_scene_psnr_step_" + str(step): scene_psnr}) # , step=wandb_step
 
                         vid_frames = create_360_video(args, inner_val_model, hwf, bound,
                                                       device,
-                                                      idx + 1, savedir, step=step)
-                        wandb.log({"test/vid_step_" + str(step): wandb.Video(
+                                                      idx + 1, savedir) # , step=step
+                        wandb.log({"test/test_vid_step_" + str(step): wandb.Video(
                             vid_frames.transpose(0, 3, 1, 2), fps=30,
-                            format="mp4")}, step=wandb_step)
+                            format="mp4")}) #, step=wandb_step
 
             indices = torch.randint(num_rays, size=[args.tto_batchsize])
             raybatch_o, raybatch_d = rays_o[indices], rays_d[indices]
@@ -182,12 +182,12 @@ def test(args, nerf_model=None, gen_model=None, epoch_idx=1):
             scene_psnr = report_result(args, inner_val_model, test_imgs, test_poses, hwf,
                                        bound)
             vid_frames = create_360_video(args, inner_val_model, hwf, bound, device, idx + 1,
-                                          savedir, step=args.tto_steps)
-            wandb.log({"test/vid_step_" + str(args.tto_steps): wandb.Video(
-                vid_frames.transpose(0, 3, 1, 2), fps=30, format="mp4")}, step=wandb_step)
+                                          savedir) #, step=args.tto_steps
+            wandb.log({"test/test_vid_step_" + str(args.tto_steps): wandb.Video(
+                vid_frames.transpose(0, 3, 1, 2), fps=30, format="mp4")}) #, step=wandb_step
 
         print(f"scene {idx+1}, psnr:{scene_psnr:.3f}, video created")
-        wandb.log({"test/scene_psnr_" + str(args.tto_steps): scene_psnr}, step=wandb_step)
+        wandb.log({"test/test_scene_psnr_" + str(args.tto_steps): scene_psnr}) #, step=wandb_step
         test_psnrs.append(scene_psnr)
         wandb_step+=1
     
