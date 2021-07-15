@@ -115,8 +115,8 @@ def train_meta(args, epoch_idx, nerf_model, gen_model, gen_optim, data_loader, d
         inner_nerf_model_copy = copy.deepcopy(nerf_model)
         for i in range(len(nerf_model_copy.net)):
             layer = nerf_model_copy.net[i]
-            if hasattr(layer, "weight"):
-                inner_nerf_model_copy.net[i].weight = nn.Parameter(layer.weight)
+            if hasattr(layer, "bias"):
+                inner_nerf_model_copy.net[i].bias = nn.Parameter(layer.bias)
 
         inner_nerf_model_copy = set_grad(inner_nerf_model_copy, True)
         inner_nerf_model_copy.train()
@@ -210,8 +210,8 @@ def val_meta(args, epoch_idx, nerf_model, gen_model, val_loader, device):
         inner_val_model = copy.deepcopy(val_model)
         for i in range(len(val_model.net)):
             layer = val_model.net[i]
-            if hasattr(layer, "weight"):
-                inner_val_model.net[i].weight = nn.Parameter(layer.weight)
+            if hasattr(layer, "bias"):
+                inner_val_model.net[i].bias = nn.Parameter(layer.bias)
 
         inner_val_model = set_grad(inner_val_model, True)
         inner_val_model.train()

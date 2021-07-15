@@ -37,15 +37,16 @@ class WeightGenerator(nn.Module):
         self.num_layers = args.hidden_layers+1
         self.out_features = args.out_features
         self.in_channel = 1472 if self.feature_extractor_type == "resnet" else 128
-        self.gen = \
+        self.linear = \
             nn.Sequential(
                 nn.Linear(self.in_channel, 128), nn.ReLU(),
                 nn.Linear(128, 128), nn.ReLU(),
                 nn.Linear(128, 128), nn.ReLU(),
                 nn.Linear(128, 128), nn.ReLU(),
                 nn.Linear(128, 128), nn.ReLU(),
-                nn.Linear(128, 128), nn.ReLU(),
-                nn.Linear(128,self.num_layers))
+                nn.Linear(128, 128), nn.ReLU())
+        self.conv = nn.Conv2d(in_channels=128, out_channels=self.num_layers,
+                          kernel_size=256)
 
 
 
@@ -70,8 +71,10 @@ class WeightGenerator(nn.Module):
         if self.feature_extractor_type == "mvsnet":
             features = self.feature_extractor(imgs, proj_mats, near_fars, pad=pad)
 
-        weight_res = self.gen(features)
-        weight_res = weight_res.permute(0, 3, 1, 2)
+        weight_res = self.linear(features[0])
+        weight_res = weight_res.permute(2, 0, 1)
+        weight_res = self.conv(weight_res)
+        # weight_res = weight_res.permute(0, 3, 1, 2)
         weight_res = F.interpolate(weight_res, size=[256, 256],mode="bilinear", align_corners=True)
         return weight_res
 
@@ -81,25 +84,23 @@ def add_weight_res(nerf, res, hidden_layers=5, log_round=False):
     logs = dict()
     for i in range(hidden_layers):
         l = i*2+1
-        weight_shape = nerf.net[l].weight.shape
+        weight_shape = nerf.net[l].bias.shape
         layer_res = torch.unsqueeze(res[:, i, :, :], 1)
         layer_res = F.interpolate(layer_res, weight_shape, mode="bilinear", align_corners=True)
-        # layer_res = torch.squeeze(torch.mean(layer_res, dim=0))
-        layer_res = torch.squeeze(layer_res[0])
 
         if log_round:
             # logs["layer" + str(l)] = wandb.Histogram(torch.flatten(nerf.net[l].weight.data.clone().detach().cpu()).numpy())
             # logs["res" + str(l)] = wandb.Histogram(torch.flatten(layer_res.clone().detach().cpu()).numpy())
-            logs["layer" + str(l) + "_weight_mean"] = torch.mean(nerf.net[l].weight.data)
-            logs["layer" + str(l) + "_weight_std"] = torch.std(nerf.net[l].weight.data)
+            logs["layer" + str(l) + "_weight_mean"] = torch.mean(nerf.net[l].bias.data)
+            logs["layer" + str(l) + "_weight_std"] = torch.std(nerf.net[l].bias.data)
             logs["layer" + str(l) + "_res_mean"] = torch.mean(layer_res)
             logs["layer" + str(l) + "_res_std"] = torch.std(layer_res)
 
 
         #! https://discuss.pytorch.org/t/assign-parameters-to-nn-module-and-have-grad-fn-track-it/62677/2
-        w = nerf.net[l].weight + (layer_res)
-        del nerf.net[l].weight
-        nerf.net[l].weight = w
+        w = nerf.net[l].bias + (layer_res)
+        del nerf.net[l].bias
+        nerf.net[l].bias = w
 
         #! create another NeRF datastructure, assign w to the new datastructure and return the new datastructure.
 
