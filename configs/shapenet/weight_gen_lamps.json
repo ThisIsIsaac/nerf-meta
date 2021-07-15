@@ -10,6 +10,7 @@
     "hidden_layers": 5,
     "hidden_features": 256,
     "out_features": 4,
+    "feature_extractor_type": "resnet",
 
     "encoding_method": "positional_encoding",
     "train_views": 25,

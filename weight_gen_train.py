@@ -18,14 +18,19 @@ traceback.install()
 from utils.shape_video import create_360_video
 from pathlib import Path
 from torchvision.utils import make_grid
+import torch.nn as nn
 
 def inner_loop(args, nerf_model, nerf_optim, pixels, imgs, rays_o, rays_d,
                poses, bound, hwf, num_samples, raybatch_size, inner_steps,
-               device, idx, step, log_round=False, setup="train/"):
+               device, idx, log_round=False, setup="train/"):
     """
     train the inner model for a specified number of iterations
     """
+    #! delete me
+    # nerf_weight_orig = copy.deepcopy(nerf_model.state_dict())
+
     num_rays = rays_d.shape[0]
+    logs = dict()
     for i in range(1, inner_steps+1):
         if log_round and ((i % args.tto_log_steps == 0) or (i == inner_steps) or (i==1)):
             with torch.no_grad():
@@ -36,10 +41,10 @@ def inner_loop(args, nerf_model, nerf_optim, pixels, imgs, rays_o, rays_d,
                 vid_frames = create_360_video(args, nerf_model, hwf, bound,
                                               device,
                                                idx, args.savedir)
-                wandb.log({setup + "scene_psnr res + tto_step=" + str(i): scene_psnr,
-                            setup + "vid_post res + tto_step=" + str(i): wandb.Video(
+                logs[setup + "scene_psnr tto_step=" + str(i)] = scene_psnr
+                logs[setup + "vid_post tto_step=" + str(i)] = wandb.Video(
                             vid_frames.transpose(0, 3, 1, 2), fps=30,
-                            format="mp4")}) #, step=step
+                            format="mp4")
 
         indices = torch.randint(num_rays, size=[raybatch_size])
         raybatch_o, raybatch_d = rays_o[indices], rays_d[indices]
@@ -47,12 +52,18 @@ def inner_loop(args, nerf_model, nerf_optim, pixels, imgs, rays_o, rays_d,
         t_vals, xyz = sample_points(raybatch_o, raybatch_d, bound[0], bound[1],
                                     num_samples, perturb=True)
         
-        nerf_optim.zero_grad()
+
         rgbs, sigmas = nerf_model(xyz)
         colors = volume_render(rgbs, sigmas, t_vals, white_bkgd=True)
         loss = F.mse_loss(colors, pixelbatch)
         loss.backward()
         nerf_optim.step()
+        nerf_optim.zero_grad()
+
+        # if check_frozen(nerf_model.state_dict(), nerf_weight_orig ):
+        #     print("Gradients of nerf model not updated during inner_step")
+
+    return logs
 
 
 
@@ -62,10 +73,13 @@ def train_meta(args, epoch_idx, nerf_model, gen_model, gen_optim, data_loader, d
     https://arxiv.org/abs/1803.02999
     """
     gen_model.train()
-    gen_model.requires_grad=True
+    gen_model.requires_grad_(True)
+    gen_model.feature_extractor.requires_grad_(False)
 
     step = (epoch_idx-1)*len(data_loader)
+    train_step = (epoch_idx - 1) * len(data_loader) + 1
     for idx, batch in enumerate(data_loader):
+        log_round=(step % args.log_interval == 0)
 
         imgs = batch["imgs"]
         poses = batch["poses"]
@@ -80,47 +94,42 @@ def train_meta(args, epoch_idx, nerf_model, gen_model, gen_optim, data_loader, d
         pixels = imgs.reshape(-1, 3)
 
         # Train weight generator
-        gen_optim.zero_grad()
         nerf_model_copy = copy.deepcopy(nerf_model) #! copy meta model initialized weights
-        nerf_model_copy = set_grad(nerf_model_copy, False)  #! then turn gradient off
-        # imgs.requires_grad_(True)
-
         weight_res = gen_model(imgs)
-        _, layer_res_list = add_weight_res(nerf_model_copy, weight_res,debug=True, hidden_features=args.hidden_features, out_features=args.out_features)
+
+        nerf_model_copy, logs_weight_stat = add_weight_res(nerf_model_copy, weight_res, log_round=log_round)
         indices = torch.randint(num_rays, size=[args.train_batchsize])
         raybatch_o, raybatch_d = rays_o[indices], rays_d[indices]
         pixelbatch = pixels[indices]
         t_vals, xyz = sample_points(raybatch_o, raybatch_d, bound[0], bound[1],
                                     args.num_samples, perturb=True)
-        # xyz.requires_grad_(True)
+
         rgbs, sigmas = nerf_model_copy(xyz)
         colors = volume_render(rgbs, sigmas, t_vals, white_bkgd=True)
-        loss = F.mse_loss(colors, pixelbatch)
-        loss.requires_grad_(True)
+
+        loss = F.mse_loss(colors, pixelbatch)#.requires_grad_()
         loss.backward()
         gen_optim.step()
+        gen_optim.zero_grad()
 
-        log_round=False
-        if step % args.log_interval == 0:
-            log_round = True
-            wandb.log({"train/mse_loss":float(loss)}) # , step=step
+        inner_nerf_model_copy = copy.deepcopy(nerf_model)
+        for i in range(len(nerf_model_copy.net)):
+            layer = nerf_model_copy.net[i]
+            if hasattr(layer, "weight"):
+                inner_nerf_model_copy.net[i].weight = nn.Parameter(layer.weight)
 
-        if ref_state_dict is not None:
-            is_equal = check_frozen(nerf_model_copy.state_dict(), ref_state_dict, layer_res_list)
-            if not is_equal:
-                print("Error: meta-nerf weight was updated during generator training")
-                raise ValueError()
-
-
-        inner_nerf_model_copy = copy.deepcopy(nerf_model_copy)
         inner_nerf_model_copy = set_grad(inner_nerf_model_copy, True)
         inner_nerf_model_copy.train()
         nerf_optim = torch.optim.SGD(inner_nerf_model_copy.parameters(), args.inner_lr)
 
-        inner_loop(args, inner_nerf_model_copy, nerf_optim, pixels, imgs,
+        logs = inner_loop(args, inner_nerf_model_copy, nerf_optim, pixels, imgs,
                     rays_o, rays_d, poses, bound, hwf, args.num_samples,
-                    args.train_batchsize, args.inner_steps, step=step,
+                    args.train_batchsize, args.inner_steps,
                     device=device, idx=idx, log_round=log_round, setup="train/")
+        if log_round:
+            logs["train/gen_model_mse_loss"] = float(loss)
+            wandb.log({**logs, **logs_weight_stat, "train_step": train_step,
+                       "imgs":wandb.Image(make_grid(imgs))})
         step+=1
 
 def report_result(model, imgs, poses, hwf, bound, num_samples, raybatch_size):
@@ -158,13 +167,10 @@ def val_meta(args, epoch_idx, nerf_model, gen_model, val_loader, device):
     validate the meta trained model for few-shot view synthesis
     """
     gen_model.eval()
-    gen_model.requires_grad=False
+    gen_model.requires_grad_(False)
     meta_trained_state = nerf_model.state_dict()
-    val_model = copy.deepcopy(nerf_model)
-
-    step = (epoch_idx-1)*len(val_loader)
-    val_psnrs_fin = []
-    val_psnrs_0 = []
+    avg_psnr = 0
+    val_step = (epoch_idx-1)*len(val_loader) +1
     for idx, batch in enumerate(val_loader):
         imgs = batch["imgs"]
         poses = batch["poses"]
@@ -177,22 +183,20 @@ def val_meta(args, epoch_idx, nerf_model, gen_model, val_loader, device):
         tto_imgs, test_imgs = torch.split(imgs, [args.tto_views, args.test_views], dim=0)
         tto_poses, test_poses = torch.split(poses, [args.tto_views, args.test_views], dim=0)
 
-        wandb.log({"val/val_tto_views": wandb.Image(make_grid(tto_imgs.permute(0, 3, 1, 2))),
-                 "val/val_test_views": wandb.Image(make_grid(test_imgs.permute(0, 3, 1, 2)))},
-                  ) #step=step
-
         rays_o, rays_d = get_rays_shapenet(hwf, tto_poses)
         rays_o, rays_d = rays_o.reshape(-1, 3), rays_d.reshape(-1, 3)
         num_rays = rays_d.shape[0]
 
         tto_pixels = tto_imgs.reshape(-1, 3)
         # Add weight residual
+        val_model = copy.deepcopy(nerf_model)
         val_model.load_state_dict(meta_trained_state)
         val_model = set_grad(val_model, False)
 
         with torch.no_grad():
             weight_res = gen_model(imgs)
-            val_model = add_weight_res(val_model, weight_res, hidden_features=args.hidden_features, out_features=args.out_features)
+            val_model, logs_weight_stat = add_weight_res(val_model, weight_res,
+                                                         log_round=True)
             indices = torch.randint(num_rays, size=[args.train_batchsize])
             raybatch_o, raybatch_d = rays_o[indices], rays_d[indices]
             pixelbatch = tto_pixels[indices]
@@ -203,41 +207,35 @@ def val_meta(args, epoch_idx, nerf_model, gen_model, val_loader, device):
             val_loss = F.mse_loss(colors, pixelbatch)
 
 
-        scene_psnr = report_result(nerf_model, imgs,
-                                           poses, hwf,
-                                           bound, args.num_samples, args.test_batchsize)
-        wandb.log({"val/val_mse_loss": val_loss,
-                    "val/val_scene_psnr res": scene_psnr}) #,step=step
-
-        # vid_frames = create_360_video(args, val_model, hwf, bound,
-        #                               device,
-        #                               idx + 1, args.savedir)
-        # wandb.log({"val/vid res": wandb.Video(
-        #     vid_frames.transpose(0, 3, 1, 2), fps=30,
-        #     format="mp4")}, step=step)
-
         inner_val_model = copy.deepcopy(val_model)
+        for i in range(len(val_model.net)):
+            layer = val_model.net[i]
+            if hasattr(layer, "weight"):
+                inner_val_model.net[i].weight = nn.Parameter(layer.weight)
+
         inner_val_model = set_grad(inner_val_model, True)
+        inner_val_model.train()
         val_optim = torch.optim.SGD(inner_val_model.parameters(), args.tto_lr)
-        scene_psnr_0 = report_result(inner_val_model, test_imgs, test_poses, hwf, bound,
-                                    args.num_samples, args.test_batchsize)
 
-        inner_loop(args, inner_val_model, val_optim, tto_pixels, tto_imgs, rays_o,
+
+        logs = inner_loop(args, inner_val_model, val_optim, tto_pixels, tto_imgs, rays_o,
                     rays_d, tto_poses, bound, hwf, args.num_samples,
-                   args.tto_batchsize, args.tto_steps, step=step,
-                   device=device, idx=idx, log_round=True, setup="val/val_")
-        
-        scene_psnr_fin = report_result(inner_val_model, test_imgs, test_poses, hwf, bound,
-                                    args.num_samples, args.test_batchsize)
-        val_psnrs_0.append(scene_psnr_0)
-        val_psnrs_fin.append(scene_psnr_fin)
-        step+=1
+                   args.tto_batchsize, args.tto_steps,
+                   device=device, idx=idx, log_round=True, setup="val/")
 
-    val_psnr_fin = torch.stack(val_psnrs_fin).mean()
-    val_psnr_0 = torch.stack(val_psnrs_0).mean()
-    return [val_psnr_0,val_psnr_fin]
+        avg_psnr += logs["val/scene_psnr tto_step=" + str(args.tto_steps)]
+        logs["val/tto_views"] = wandb.Image(make_grid(tto_imgs.permute(0, 3, 1, 2)))
+        logs["val/test_views"] = wandb.Image(make_grid(test_imgs.permute(0, 3, 1, 2)))
+        logs["val/mse_loss"] = val_loss
+        wandb.log({**logs, **logs_weight_stat, "val_step":val_step})
+        val_step+=1
+    avg_psnr /= len(val_loader)
+    wandb.log({"val/avg_psnr":avg_psnr, "epoch_step":epoch_idx})
 
-def check_frozen(ckpt, ref_ckpt, layer_res_list):
+
+
+
+def check_frozen(ckpt, ref_ckpt, layer_res_list=None):
     eps = 0.0000001
     i=0
     for key in ckpt.keys():
@@ -248,8 +246,12 @@ def check_frozen(ckpt, ref_ckpt, layer_res_list):
         diff = w - ref_w
 
         if "weight" in key:
-            max_diff = (diff-layer_res_list[i]).abs().max()
-            i += 1
+            if layer_res_list is not None:
+                max_diff = (diff-layer_res_list[i]).abs().max()
+                i += 1
+            else:
+                max_diff = diff.abs().max()
+
 
         if "bias" in key:
             max_diff = diff.abs().max()
@@ -258,7 +260,7 @@ def check_frozen(ckpt, ref_ckpt, layer_res_list):
             print(key + " was not the same")
             print("max diff: " + str(max_diff))
             return False
-        if i == len(layer_res_list):
+        if layer_res_list is not None and i == len(layer_res_list):
             break
     return True
 
@@ -276,7 +278,7 @@ def main():
         info = json.load(config)
         for key, value in info.items():
             args.__dict__[key] = value
-
+    args.savedir = Path(args.savedir)
     wandb.init(name="train_"+args.exp_name, dir="/root/nerf-meta-main/", project="meta_NeRF", entity="stereo",
                save_code=True, job_type="train")
 
@@ -298,11 +300,11 @@ def main():
     gen_model.feature_extractor.to(device)
     nerf_model = build_nerf(args)
     nerf_model.to(device)
-    gen_optim = torch.optim.Adam(gen_model.parameters(), lr=args.meta_lr)
+    gen_optim = torch.optim.Adam(gen_model.gen.parameters(), lr=args.meta_lr)
 
     print("Training set: " + str(len(train_loader)) + " images" )
     print("Val set: " + str(len(val_loader)) + " images")
-    args.savedir = Path(args.savedir)
+
 
     if args.weight_path is not None:
         checkpoint = torch.load(args.weight_path, map_location=device)
@@ -326,17 +328,10 @@ def main():
         raise ValueError()
 
     wandb.watch(gen_model.gen, log="all", log_freq=100)
-    print("starting to train...")
     for epoch in range(1, args.meta_epochs+1):
-        # [val_psnr_0, val_psnr_fin] = val_meta(args, epoch, nerf_model,
-        #                                       gen_model, val_loader, device)
-
+        print("Epoch " + str(epoch) + " training...")
         train_meta(args, epoch, nerf_model, gen_model, gen_optim, train_loader, device, ref_state_dict=nerf_checkpoint)
-        [val_psnr_0, val_psnr_fin] = val_meta(args, epoch, nerf_model, gen_model, val_loader, device)
-
-        print(f"Epoch: {epoch}, val_psnr_0: {val_psnr_0:0.3f} | val psnr fin: {val_psnr_fin:0.3f}")
-        wandb.log({"val_psnr_0": val_psnr_0}) #, step=epoch
-        wandb.log({"val_psnr_fin": val_psnr_fin}) #step=epoch
+        val_meta(args, epoch, nerf_model, gen_model, val_loader, device)
 
         ckpt_name = "./" + args.exp_name + "_epoch" + str(epoch) + ".pth"
         torch.save({
@@ -346,7 +341,10 @@ def main():
             'nerf_model_state_dict': nerf_model.state_dict()
         }, ckpt_name)
         wandb.save(ckpt_name)
+    print("Testing...")
     test(args, nerf_model=nerf_model, gen_model=gen_model)
+    print("Complete!")
+
 
 if __name__ == '__main__':
     main()

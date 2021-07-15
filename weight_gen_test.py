@@ -75,18 +75,14 @@ def test(args, nerf_model=None, gen_model=None, epoch_idx=1):
                             splits_path=args.splits_path,
                             num_views=args.tto_views+args.test_views)
     test_loader = DataLoader(test_set, batch_size=1, shuffle=False)
-    test_nerf_model = copy.deepcopy(nerf_model)
 
-    # model = build_nerf(args)
-    # model.to(device)
-    # wandb.save(args.weight_path)
-    nerf_state = copy.deepcopy(test_nerf_model.state_dict())
+    nerf_state = copy.deepcopy(nerf_model.state_dict())
     savedir = args.savedir
-    # savedir = Path(args.savedir)
     savedir.mkdir(exist_ok=True)
     
     test_psnrs = []
-    wandb_step = (epoch_idx-1)*len(test_loader)
+    test_step = (epoch_idx-1)*len(test_loader)+1
+
     for idx, batch in enumerate(test_loader):
         imgs = batch["imgs"]
         poses = batch["poses"]
@@ -102,19 +98,20 @@ def test(args, nerf_model=None, gen_model=None, epoch_idx=1):
         rays_o, rays_d = rays_o.reshape(-1, 3), rays_d.reshape(-1, 3)
         num_rays = rays_d.shape[0]
 
+        logs=dict()
+        logs['test/test_time_opt_imgs'] = wandb.Image(torch.squeeze(torch.transpose(tto_imgs, 0, 3)))
+        logs['test/test_time_input_imgs'] = wandb.Image(test_imgs.permute(0, 3, 1, 2))
 
-        wandb.log({'test/test_time_opt_imgs': wandb.Image(torch.squeeze(torch.transpose(tto_imgs, 0, 3)))}) #,step=wandb_step
-        wandb.log({'test/test_time_input_imgs': wandb.Image(test_imgs.permute(0, 3, 1, 2))}) #,step=wandb_step
-
-    
+        test_nerf_model = copy.deepcopy(nerf_model)
         test_nerf_model.load_state_dict(nerf_state)
         test_nerf_model = set_grad(test_nerf_model, False)
 
         with torch.no_grad():
             weight_res = gen_model(imgs)
-            test_nerf_model = add_weight_res(test_nerf_model, weight_res,
-                                       hidden_features=args.hidden_features,
-                                       out_features=args.out_features)
+            test_nerf_model, logs_weight_stat = add_weight_res(test_nerf_model, weight_res,
+                                                                hidden_features=args.hidden_features,
+                                                                out_features=args.out_features,
+                                                                log_round=True)
             indices = torch.randint(num_rays, size=[args.train_batchsize])
             raybatch_o, raybatch_d = rays_o[indices], rays_d[indices]
             pixelbatch = tto_pixels[indices]
@@ -141,12 +138,15 @@ def test(args, nerf_model=None, gen_model=None, epoch_idx=1):
                         with torch.no_grad():
                             scene_psnr = report_result(args, inner_val_model, test_imgs, test_poses, hwf,
                                                        bound)
-                            wandb.log({"test/test_scene_psnr_step_" + str(step): scene_psnr}) #, step=wandb_step
+
 
                             vid_frames = create_360_video(args, inner_val_model, hwf, bound, device,
                                                           idx + 1, savedir) #, step=step
-                            wandb.log({"test/test_vid_step_" + str(step): wandb.Video(
-                                vid_frames.transpose(0, 3, 1, 2), fps=30, format="mp4")}) #, step=wandb_step
+
+                            logs["test/test_scene_psnr_step=" + str(step)] = scene_psnr
+                            logs["test/test_vid_step=" + str(step)] = \
+                                wandb.Video(vid_frames.transpose(0, 3, 1, 2), fps=30, format="mp4")
+
                             has_recorded_without_tto = True
 
                 else:
@@ -154,14 +154,16 @@ def test(args, nerf_model=None, gen_model=None, epoch_idx=1):
                         scene_psnr = report_result(args, inner_val_model, test_imgs,
                                                    test_poses, hwf,
                                                    bound)
-                        wandb.log({"test/test_scene_psnr_step_" + str(step): scene_psnr}) # , step=wandb_step
 
                         vid_frames = create_360_video(args, inner_val_model, hwf, bound,
                                                       device,
                                                       idx + 1, savedir) # , step=step
-                        wandb.log({"test/test_vid_step_" + str(step): wandb.Video(
+                        logs["test/test_scene_psnr_step=" + str(step)] = scene_psnr
+                        logs["test/test_vid_step=" + str(step)] =\
+                            wandb.Video(
                             vid_frames.transpose(0, 3, 1, 2), fps=30,
-                            format="mp4")}) #, step=wandb_step
+                            format="mp4")
+
 
             indices = torch.randint(num_rays, size=[args.tto_batchsize])
             raybatch_o, raybatch_d = rays_o[indices], rays_d[indices]
@@ -183,16 +185,19 @@ def test(args, nerf_model=None, gen_model=None, epoch_idx=1):
                                        bound)
             vid_frames = create_360_video(args, inner_val_model, hwf, bound, device, idx + 1,
                                           savedir) #, step=args.tto_steps
-            wandb.log({"test/test_vid_step_" + str(args.tto_steps): wandb.Video(
-                vid_frames.transpose(0, 3, 1, 2), fps=30, format="mp4")}) #, step=wandb_step
+            logs["test/test_scene_psnr_step=" + str(args.tto_steps)] = scene_psnr
+            logs["test/test_vid_step=" + str(args.tto_steps)] = \
+                wandb.Video(vid_frames.transpose(0, 3, 1, 2), fps=30, format="mp4")
 
         print(f"scene {idx+1}, psnr:{scene_psnr:.3f}, video created")
-        wandb.log({"test/test_scene_psnr_" + str(args.tto_steps): scene_psnr}) #, step=wandb_step
+        wandb.log({**logs, **logs_weight_stat, "test_step":test_step})
+        test_step+=1
+
         test_psnrs.append(scene_psnr)
-        wandb_step+=1
     
     test_psnrs = torch.stack(test_psnrs)
     psnr_mean = test_psnrs.mean()
+    wandb.log({"test/mean_psnr":psnr_mean})
     wandb.save(str(savedir))
     print("----------------------------------")
     print(f"test dataset mean psnr: " + str(psnr_mean))

@@ -14,8 +14,12 @@ from rich import pretty
 pretty.install()
 from rich import traceback
 traceback.install()
+from torchvision.utils import make_grid
+from utils.shape_video import create_360_video
+from pathlib import Path
 
-def inner_loop(model, optim, imgs, poses, hwf, bound, num_samples, raybatch_size, inner_steps):
+def inner_loop(args, model, optim, imgs, poses, hwf, bound, num_samples, raybatch_size, inner_steps,
+               device, idx, log_round=False, setup="train/"):
     """
     train the inner model for a specified number of iterations
     """
@@ -25,7 +29,22 @@ def inner_loop(model, optim, imgs, poses, hwf, bound, num_samples, raybatch_size
     rays_o, rays_d = rays_o.reshape(-1, 3), rays_d.reshape(-1, 3)
 
     num_rays = rays_d.shape[0]
-    for step in range(inner_steps):
+    logs = dict()
+    for i in range(1, inner_steps+1):
+        if log_round and ((i % args.tto_log_steps == 0) or (i == inner_steps) or (i==1)):
+            with torch.no_grad():
+                scene_psnr = report_result(model, imgs,
+                                           poses, hwf,
+                                           bound, num_samples, raybatch_size)
+
+                vid_frames = create_360_video(args, model, hwf, bound,
+                                              device,
+                                               idx, args.savedir)
+                logs[setup + "scene_psnr tto_step=" + str(i)] = scene_psnr
+                logs[setup + "vid_post tto_step=" + str(i)] = wandb.Video(
+                            vid_frames.transpose(0, 3, 1, 2), fps=30,
+                            format="mp4")
+
         indices = torch.randint(num_rays, size=[raybatch_size])
         raybatch_o, raybatch_d = rays_o[indices], rays_d[indices]
         pixelbatch = pixels[indices] 
@@ -38,14 +57,18 @@ def inner_loop(model, optim, imgs, poses, hwf, bound, num_samples, raybatch_size
         loss = F.mse_loss(colors, pixelbatch)
         loss.backward()
         optim.step()
+    return logs
 
 
-def train_meta(args, meta_model, meta_optim, data_loader, device):
+def train_meta(args, epoch_idx, meta_model, meta_optim, data_loader, device):
     """
     train the meta_model for one epoch using reptile meta learning
     https://arxiv.org/abs/1803.02999
     """
-    for imgs, poses, hwf, bound in data_loader:
+
+    step = (epoch_idx - 1) * len(data_loader)
+    for idx,(imgs, poses, hwf, bound) in enumerate(data_loader):
+        log_round = (step % args.log_interval == 0)
         imgs, poses, hwf, bound = imgs.to(device), poses.to(device), hwf.to(device), bound.to(device)
         imgs, poses, hwf, bound = imgs.squeeze(), poses.squeeze(), hwf.squeeze(), bound.squeeze()
 
@@ -54,15 +77,18 @@ def train_meta(args, meta_model, meta_optim, data_loader, device):
         inner_model = copy.deepcopy(meta_model)
         inner_optim = torch.optim.SGD(inner_model.parameters(), args.inner_lr)
 
-        inner_loop(inner_model, inner_optim, imgs, poses,
+        logs=inner_loop(args, inner_model, inner_optim, imgs, poses,
                     hwf, bound, args.num_samples,
-                    args.train_batchsize, args.inner_steps)
+                    args.train_batchsize, args.inner_steps, device=device, idx=idx, log_round=log_round,
+                   setup="train/")
         
         with torch.no_grad():
             for meta_param, inner_param in zip(meta_model.parameters(), inner_model.parameters()):
                 meta_param.grad = meta_param - inner_param
-        
         meta_optim.step()
+        if log_round:
+            wandb.log(logs)
+        step+=1
 
 
 def report_result(model, imgs, poses, hwf, bound, num_samples, raybatch_size):
@@ -101,9 +127,8 @@ def val_meta(args, model, val_loader, device):
     """
     meta_trained_state = model.state_dict()
     val_model = copy.deepcopy(model)
-    
-    val_psnrs = []
-    for imgs, poses, hwf, bound in val_loader:
+
+    for idx, (imgs, poses, hwf, bound) in enumerate(val_loader):
         imgs, poses, hwf, bound = imgs.to(device), poses.to(device), hwf.to(device), bound.to(device)
         imgs, poses, hwf, bound = imgs.squeeze(), poses.squeeze(), hwf.squeeze(), bound.squeeze()
 
@@ -113,28 +138,30 @@ def val_meta(args, model, val_loader, device):
         val_model.load_state_dict(meta_trained_state)
         val_optim = torch.optim.SGD(val_model.parameters(), args.tto_lr)
 
-        inner_loop(val_model, val_optim, tto_imgs, tto_poses, hwf,
-                    bound, args.num_samples, args.tto_batchsize, args.tto_steps)
-        
-        scene_psnr = report_result(val_model, test_imgs, test_poses, hwf, bound, 
-                                    args.num_samples, args.test_batchsize)
-        val_psnrs.append(scene_psnr)
+        logs = inner_loop(args, val_model, val_optim, tto_imgs, tto_poses, hwf,
+                    bound, args.num_samples, args.tto_batchsize, args.tto_steps,
+                    device=device, idx=idx, log_round=True, setup="val/")
 
-    val_psnr = torch.stack(val_psnrs).mean()
-    return val_psnr
+        logs["val/tto_views"] = wandb.Image(
+            make_grid(tto_imgs.permute(0, 3, 1, 2)))
+        logs["val/test_views"] = wandb.Image(
+            make_grid(test_imgs.permute(0, 3, 1, 2)))
+        wandb.log(logs)
+
 
 
 def main():
     parser = argparse.ArgumentParser(description='shapenet few-shot view synthesis')
     parser.add_argument('--config', type=str, required=True,
                         help='config file for the shape class (cars, chairs or lamps)')
+    parser.add_argument('--weight_path', type=str, default=None)
     args = parser.parse_args()
 
     with open(args.config) as config:
         info = json.load(config)
         for key, value in info.items():
             args.__dict__[key] = value
-
+    args.savedir = Path(args.savedir)
     wandb.init(name="train_"+args.exp_name, dir="/root/nerf-meta-main/", project="meta_NeRF", entity="stereo",
                save_code=True, job_type="train")
 
@@ -154,13 +181,19 @@ def main():
     meta_model = build_nerf(args)
     meta_model.to(device)
 
+    if hasattr(args, "weight_path") and args.weight_path is not None:
+        checkpoint = torch.load(args.weight_path, map_location=device)
+        meta_state = checkpoint['meta_model_state_dict']
+        meta_model.load_state_dict(meta_state)
+
     meta_optim = torch.optim.Adam(meta_model.parameters(), lr=args.meta_lr)
     print("starting to train...")
+
+
     for epoch in range(1, args.meta_epochs+1):
-        train_meta(args, meta_model, meta_optim, train_loader, device)
-        val_psnr = val_meta(args, meta_model, val_loader, device)
-        print(f"Epoch: {epoch}, val psnr: {val_psnr:0.3f}")
-        wandb.log({"epoch":epoch, "val_psnr": val_psnr})
+        print("Epoch: " + str(epoch))
+        train_meta(args, epoch, meta_model, meta_optim, train_loader, device)
+        val_meta(args, meta_model, val_loader, device)
 
         ckpt_name = "./"+args.exp_name+"_epoch" + str(epoch) + ".pth"
         torch.save({
