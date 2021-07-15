@@ -70,8 +70,8 @@ class WeightGenerator(nn.Module):
         if self.feature_extractor_type == "mvsnet":
             features = self.feature_extractor(imgs, proj_mats, near_fars, pad=pad)
 
-        weight_res = self.gen(features)
-        weight_res = weight_res.permute(0, 3, 1, 2)
+        weight_res = self.gen(features[0])
+        weight_res = torch.unsqueeze(weight_res.permute(2, 0, 1), 0)
         weight_res = F.interpolate(weight_res, size=[256, 256],mode="bilinear", align_corners=True)
         return weight_res
 
@@ -84,8 +84,6 @@ def add_weight_res(nerf, res, hidden_layers=5, log_round=False):
         weight_shape = nerf.net[l].weight.shape
         layer_res = torch.unsqueeze(res[:, i, :, :], 1)
         layer_res = F.interpolate(layer_res, weight_shape, mode="bilinear", align_corners=True)
-        # layer_res = torch.squeeze(torch.mean(layer_res, dim=0))
-        layer_res = torch.squeeze(layer_res[0])
 
         if log_round:
             # logs["layer" + str(l)] = wandb.Histogram(torch.flatten(nerf.net[l].weight.data.clone().detach().cpu()).numpy())
