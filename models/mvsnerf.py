@@ -6,6 +6,7 @@ from utils.mvsnerf_util import homo_warp
 from inplace_abn import InPlaceABN
 # from renderer import run_network_mvs
 import torch.nn.functional as F
+import numpy as np
 
 def weights_init(m):
     if isinstance(m, nn.Linear):
@@ -689,6 +690,8 @@ class MVSNet(nn.Module):
         # init_depth_min, depth_interval: (B) or float
         # near_far (B, V, 2)
 
+        proj_mats = torch.unsqueeze(proj_mats[:3], 0)
+        imgs = torch.unsqueeze(imgs[:3], 0)
         B, V, _, H, W = imgs.shape
 
         imgs = imgs.reshape(B * V, 3, H, W)

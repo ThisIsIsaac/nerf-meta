@@ -30,7 +30,10 @@ class WeightGenerator(nn.Module):
 
         elif args.feature_extractor_type == "mvsnet":
             self.feature_extractor = MVSNet().requires_grad_(False)
-            self.feature_extractor.eavl()
+            self.feature_extractor.eval()
+            self.transform=lambda x: x
+
+            self.compressor = nn.Sequential(nn.Linear(8, 1), nn.ReLU())
 
 
         # self.hidden_features = args.hidden_features
@@ -48,8 +51,8 @@ class WeightGenerator(nn.Module):
                 nn.Linear(128,self.num_layers))
 
 
-
-    def forward(self, imgs, proj_mats=None, near_fars=None,pad=None):
+    # pad=24 is used as the default value for dtu mvsnet
+    def forward(self, imgs, proj_mats=None, near_fars=None,pad=24):
         """Extract feature vectors from input images."""
         # source: https://github.com/yunjey/pytorch-tutorial/blob/0500d3df5a2a8080ccfccbc00aca0eacc21818db/tutorials/03-advanced/image_captioning/model.py#L18
         imgs = imgs.permute(0, 3, 1, 2)
@@ -66,11 +69,16 @@ class WeightGenerator(nn.Module):
                         features.append(feat)
                 features = torch.cat(features, dim=1)
                 features = features.permute(0, 2, 3, 1)
+                features = torch.squeeze(features)
 
         if self.feature_extractor_type == "mvsnet":
             features = self.feature_extractor(imgs, proj_mats, near_fars, pad=pad)
+            features = torch.squeeze(features[0])
+            features = features.permute(1, 2, 3, 0)
+            features = torch.squeeze(self.compressor(features))
+            features = features.permute(1, 2, 0)
 
-        weight_res = self.gen(features[0])
+        weight_res = self.gen(features)
         weight_res = torch.unsqueeze(weight_res.permute(2, 0, 1), 0)
         weight_res = F.interpolate(weight_res, size=[256, 256],mode="bilinear", align_corners=True)
         return weight_res

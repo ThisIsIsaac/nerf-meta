@@ -88,8 +88,13 @@ def test(args, nerf_model=None, gen_model=None, epoch_idx=1):
         poses = batch["poses"]
         hwf = batch["hwf"]
         bound = batch["bound"]
-        imgs, poses, hwf, bound = imgs.to(device), poses.to(device), hwf.to(device), bound.to(device)
-        imgs, poses, hwf, bound = imgs.squeeze(), poses.squeeze(), hwf.squeeze(), bound.squeeze()
+        relative_poses = batch["relative_poses"]
+        imgs, poses, hwf, bound, relative_poses = imgs.to(device), poses.to(
+            device), hwf.to(device), bound.to(device), relative_poses.to(device)
+        imgs, poses, hwf, bound, relative_poses = imgs.squeeze(), \
+                                                  poses.squeeze(), \
+                                                  hwf.squeeze(), \
+                                                  bound.squeeze(), relative_poses.squeeze()
 
         tto_imgs, test_imgs = torch.split(imgs, [args.tto_views, args.test_views], dim=0)
         tto_poses, test_poses = torch.split(poses, [args.tto_views, args.test_views], dim=0)
@@ -107,7 +112,7 @@ def test(args, nerf_model=None, gen_model=None, epoch_idx=1):
         test_nerf_model = set_grad(test_nerf_model, False)
 
         with torch.no_grad():
-            weight_res = gen_model(imgs)
+            weight_res = gen_model(imgs, relative_poses, bound)
             test_nerf_model, logs_weight_stat = add_weight_res(test_nerf_model, weight_res,
                                                                 hidden_features=args.hidden_features,
                                                                 out_features=args.out_features,

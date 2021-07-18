@@ -1,0 +1,37 @@
+{
+    "exp_name": "mvs_weight_gen_shapenet_lamps",
+    "dataset_root": "/data/private/metaNeRF_datasets/shapenet/03636649",
+    "splits_path": "/data/private/metaNeRF_datasets/shapenet/lamp_splits.json",
+    "nerf_weight_path": "./shapenet_lamps_fin.pth",
+    "log_interval": 100,
+
+    "max_freq": 8,
+    "num_freqs": 20,
+    "hidden_layers": 5,
+    "hidden_features": 256,
+    "out_features": 4,
+    "feature_extractor_type": "mvsnet",
+
+    "encoding_method": "positional_encoding",
+    "train_views": 25,
+    "meta_epochs": 15,
+    "meta_lr": 5e-5,
+    "train_batchsize": 128,
+    "num_samples": 128,
+
+    "inner_lr": 0.5,
+    "inner_steps": 32,
+    "tto_views": 1,
+    "tto_lr": 0.5,
+    "tto_batchsize": 64,
+    "tto_steps": 2000,
+    "tto_log_steps" : 500,
+
+    "test_views": 25,
+    "test_batchsize": 4096,
+    "radius": 4.0,
+    "savedir": "./videos",
+
+    "img_resize_h": 224,
+    "img_resize_w": 224
+}

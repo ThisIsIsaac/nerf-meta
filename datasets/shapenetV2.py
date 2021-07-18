@@ -5,6 +5,7 @@ import torch
 from torch.utils.data import Dataset
 from torchvision import transforms
 from models.rendering import get_rays_shapenet, sample_points, volume_render
+import numpy as np
 
 class ShapenetDatasetV2(Dataset):
     """
@@ -68,11 +69,23 @@ class ShapenetDatasetV2(Dataset):
         far = 6.
         bound = torch.as_tensor([near, far], dtype=torch.float)
 
+        # projection matrices have to be relative to the reference view
+        # see mvsnerf/data/dtu.py, line 162
+        V = imgs.shape[0]
+        ref_proj = poses[0]
+        ref_proj_inv = torch.inverse(ref_proj)
+        relative_proj_mats = []
+        relative_proj_mats += [np.eye(4)]
+        for i in range(1, V):
+            relative_proj_mats += [poses[i] @ ref_proj_inv]
+        relative_proj_mats = torch.FloatTensor(relative_proj_mats)
+
         return {
             "imgs": imgs,
             "poses": poses,
             "hwf":hwf,
             "bound":bound,
+            "relative_poses":relative_proj_mats
         }
 
 
