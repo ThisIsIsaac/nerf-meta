@@ -19,7 +19,6 @@ from utils.shape_video import create_360_video
 from pathlib import Path
 from torchvision.utils import make_grid
 import torch.nn as nn
-
 def inner_loop(args, nerf_model, nerf_optim, pixels, imgs, rays_o, rays_d,
                poses, bound, hwf, num_samples, raybatch_size, inner_steps,
                device, idx, log_round=False, setup="train/"):
@@ -129,7 +128,7 @@ def train_meta(args, epoch_idx, nerf_model, gen_model, gen_optim, data_loader, d
         if log_round:
             logs["train/gen_model_mse_loss"] = float(loss)
             wandb.log({**logs, **logs_weight_stat, "train_step": train_step,
-                       "imgs":wandb.Image(make_grid(imgs))})
+                       "imgs":wandb.Image(make_grid(imgs.permute(0, 3, 1, 2)))})
         step+=1
 
 def report_result(model, imgs, poses, hwf, bound, num_samples, raybatch_size):
@@ -272,6 +271,8 @@ def main():
     parser.add_argument('--weight_path', type=str,default=None,
                         help='config file for the shape class (cars, chairs '
                              'or lamps)')
+    parser.add_argument('--debug_overfit_single_scene',  default=False,
+                        action="store_true")
     args = parser.parse_args()
 
     with open(args.config) as config:

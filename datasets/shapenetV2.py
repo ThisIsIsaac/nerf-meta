@@ -21,9 +21,14 @@ class ShapenetDatasetV2(Dataset):
         super().__init__()
         self.all_folders = all_folders
         self.num_views = num_views
+        self.debug_overfit_single_scene = False
+        if getattr(args, "debug_overfit_single_scene")== True:
+            self.debug_overfit_single_scene = True
 
 
     def __getitem__(self, idx):
+        if self.debug_overfit_single_scene:
+            idx = 0
         folderpath = self.all_folders[idx]
         meta_path = folderpath.joinpath("transforms.json")
         with open(meta_path, "r") as meta_file:
