@@ -3,6 +3,7 @@
     "dataset_root": "/data/private/metaNeRF_datasets/shapenet/03636649",
     "splits_path": "/data/private/metaNeRF_datasets/shapenet/lamp_splits.json",
     "nerf_weight_path": "./shapenet_lamps_fin.pth",
+    "mvsnet_weight_path": "/root/mvsnerf/ckpts/mvsnerf-v0.tar",
     "log_interval": 100,
 
     "max_freq": 8,

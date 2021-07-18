@@ -315,6 +315,10 @@ def main():
         gen_model.load_state_dict(checkpoint['gen_model_state_dict'])
         gen_optim.load_state_dict(checkpoint['gen_optim_state_dict'])
 
+    if args.feature_extractor_type == "mvsnet":
+        checkpoint = torch.load(args.mvsnet_weight_path, map_location=device)
+        gen_model.feature_extractor.load_state_dict(checkpoint["network_mvs_state_dict"])
+
     if args.nerf_weight_path is not None:
         nerf_checkpoint = torch.load(args.nerf_weight_path, map_location=device)
 

@@ -105,7 +105,7 @@ def add_weight_res(nerf, res, hidden_layers=5, log_round=False):
         #! https://discuss.pytorch.org/t/assign-parameters-to-nn-module-and-have-grad-fn-track-it/62677/2
         w = nerf.net[l].weight + (layer_res)
         del nerf.net[l].weight
-        nerf.net[l].weight = w
+        nerf.net[l].weight = torch.squeeze(w)
 
         #! create another NeRF datastructure, assign w to the new datastructure and return the new datastructure.
 
