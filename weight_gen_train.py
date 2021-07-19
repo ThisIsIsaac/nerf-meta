@@ -94,7 +94,7 @@ def train_meta(args, epoch_idx, nerf_model, gen_model, gen_optim, data_loader, d
         nerf_model_copy = copy.deepcopy(nerf_model) #! copy meta model initialized weights
         weight_res = gen_model(imgs, relative_poses, bound)
 
-        nerf_model_copy, logs_weight_stat = add_weight_res(nerf_model_copy, weight_res, log_round=log_round)
+        nerf_model_copy, logs_weight_stat = add_weight_res(nerf_model_copy, weight_res, log_round=log_round, setup="train/")
         indices = torch.randint(num_rays, size=[args.train_batchsize])
         raybatch_o, raybatch_d = rays_o[indices], rays_d[indices]
         pixelbatch = pixels[indices]
@@ -198,7 +198,7 @@ def val_meta(args, epoch_idx, nerf_model, gen_model, val_loader, device):
         with torch.no_grad():
             weight_res = gen_model(imgs, relative_poses, bound)
             val_model, logs_weight_stat = add_weight_res(val_model, weight_res,
-                                                         log_round=True)
+                                                         log_round=True, setup="val/")
             indices = torch.randint(num_rays, size=[args.train_batchsize])
             raybatch_o, raybatch_d = rays_o[indices], rays_d[indices]
             pixelbatch = tto_pixels[indices]

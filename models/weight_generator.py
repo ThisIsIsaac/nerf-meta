@@ -31,7 +31,9 @@ class WeightGenerator(nn.Module):
         elif args.feature_extractor_type == "mvsnet":
             self.feature_extractor = MVSNet().requires_grad_(False)
             self.feature_extractor.eval()
-            self.transform=lambda x: x
+            self.transform = transforms.Compose([transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                                    std=[0.229, 0.224, 0.225]),
+                                        ])
 
             self.compressor = nn.Sequential(nn.Linear(8, 1), nn.ReLU())
 
@@ -83,7 +85,7 @@ class WeightGenerator(nn.Module):
         weight_res = F.interpolate(weight_res, size=[256, 256],mode="bilinear", align_corners=True)
         return weight_res
 
-def add_weight_res(nerf, res, hidden_layers=5, log_round=False):
+def add_weight_res(nerf, res, hidden_layers=5, log_round=False, setup="train/"):
     _, _, res_H, res_W = res.shape
     res *= 0.2
     logs = dict()
@@ -96,10 +98,10 @@ def add_weight_res(nerf, res, hidden_layers=5, log_round=False):
         if log_round:
             # logs["layer" + str(l)] = wandb.Histogram(torch.flatten(nerf.net[l].weight.data.clone().detach().cpu()).numpy())
             # logs["res" + str(l)] = wandb.Histogram(torch.flatten(layer_res.clone().detach().cpu()).numpy())
-            logs["layer" + str(l) + "_weight_mean"] = torch.mean(nerf.net[l].weight.data)
-            logs["layer" + str(l) + "_weight_std"] = torch.std(nerf.net[l].weight.data)
-            logs["layer" + str(l) + "_res_mean"] = torch.mean(layer_res)
-            logs["layer" + str(l) + "_res_std"] = torch.std(layer_res)
+            logs[setup+"layer" + str(l) + "_weight_mean"] = torch.mean(nerf.net[l].weight.data)
+            logs[setup+"layer" + str(l) + "_weight_std"] = torch.std(nerf.net[l].weight.data)
+            logs[setup+"layer" + str(l) + "_res_mean"] = torch.mean(layer_res)
+            logs[setup+"layer" + str(l) + "_res_std"] = torch.std(layer_res)
 
 
         #! https://discuss.pytorch.org/t/assign-parameters-to-nn-module-and-have-grad-fn-track-it/62677/2

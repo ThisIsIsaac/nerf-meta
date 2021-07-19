@@ -116,7 +116,7 @@ def test(args, nerf_model=None, gen_model=None, epoch_idx=1):
             test_nerf_model, logs_weight_stat = add_weight_res(test_nerf_model, weight_res,
                                                                 hidden_features=args.hidden_features,
                                                                 out_features=args.out_features,
-                                                                log_round=True)
+                                                                log_round=True, setup="test/")
             indices = torch.randint(num_rays, size=[args.train_batchsize])
             raybatch_o, raybatch_d = rays_o[indices], rays_d[indices]
             pixelbatch = tto_pixels[indices]
