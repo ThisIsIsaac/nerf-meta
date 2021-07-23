@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import wandb
 
 class WeightGenerator(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args, out_channel):
         """Load the pretrained ResNet-152 and replace top fc layer."""
         # source: https://github.com/yunjey/pytorch-tutorial/blob/0500d3df5a2a8080ccfccbc00aca0eacc21818db/tutorials/03-advanced/image_captioning/model.py#L9
         super(WeightGenerator, self).__init__()
@@ -22,11 +22,12 @@ class WeightGenerator(nn.Module):
             self.extraction_layers = [5, 12, 22, 32, 42]
             # Image preprocessing, normalization for the pretrained resnet
             # source: https://github.com/yunjey/pytorch-tutorial/blob/0500d3df5a2a8080ccfccbc00aca0eacc21818db/tutorials/03-advanced/image_captioning/train.py#L22
-
             self.transform = transforms.Compose([
                 transforms.Normalize((0.485, 0.456, 0.406),
                                      (0.229, 0.224, 0.225))
             ])
+            self.compressor = nn.Sequential(
+                nn.Conv3d(25, 8, kernel_size=7, stride=4, padding=3), nn.ReLU())
 
         elif args.feature_extractor_type == "mvsnet":
             self.feature_extractor = MVSNet().requires_grad_(False)
@@ -34,23 +35,27 @@ class WeightGenerator(nn.Module):
             self.transform = transforms.Compose([transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                                     std=[0.229, 0.224, 0.225]),
                                         ])
+            self.compressor = nn.Sequential(
+                nn.Conv3d(8, 4, kernel_size=7, stride=2, padding=3), nn.ReLU())
 
-            self.compressor = nn.Sequential(nn.Linear(8, 1), nn.ReLU())
+
 
 
         # self.hidden_features = args.hidden_features
         self.num_layers = args.hidden_layers+1
-        self.out_features = args.out_features
-        self.in_channel = 1472 if self.feature_extractor_type == "resnet" else 128
+        self.out_channel = out_channel
+        self.hidden_channel=256
+        self.in_channel = 753664 if self.feature_extractor_type == "resnet" else (6553600//16)
+
         self.gen = \
             nn.Sequential(
-                nn.Linear(self.in_channel, 128), nn.ReLU(),
-                nn.Linear(128, 128), nn.ReLU(),
-                nn.Linear(128, 128), nn.ReLU(),
-                nn.Linear(128, 128), nn.ReLU(),
-                nn.Linear(128, 128), nn.ReLU(),
-                nn.Linear(128, 128), nn.ReLU(),
-                nn.Linear(128,self.num_layers))
+                nn.Linear(self.in_channel, self.hidden_channel), nn.ReLU(),
+                nn.Linear(self.hidden_channel, self.hidden_channel), nn.ReLU(),
+                nn.Linear(self.hidden_channel, self.hidden_channel), nn.ReLU(),
+                nn.Linear(self.hidden_channel, self.hidden_channel), nn.ReLU(),
+                nn.Linear(self.hidden_channel, self.hidden_channel), nn.ReLU(),
+                nn.Linear(self.hidden_channel, self.hidden_channel), nn.ReLU(),
+                nn.Linear(self.hidden_channel,self.out_channel))
 
 
     # pad=24 is used as the default value for dtu mvsnet
@@ -70,34 +75,32 @@ class WeightGenerator(nn.Module):
                         feat = F.interpolate(feat, size=[64, 64], mode="bilinear", align_corners=True)
                         features.append(feat)
                 features = torch.cat(features, dim=1)
-                features = features.permute(0, 2, 3, 1)
-                features = torch.squeeze(features)
+                features = torch.unsqueeze(features, 0)
 
         if self.feature_extractor_type == "mvsnet":
-            features = self.feature_extractor(imgs, proj_mats, near_fars, pad=pad)
-            features = torch.squeeze(features[0])
-            features = features.permute(1, 2, 3, 0)
-            features = torch.squeeze(self.compressor(features))
-            features = features.permute(1, 2, 0)
+            features = self.feature_extractor(imgs, proj_mats, near_fars, pad=pad)[0]
 
+        features = torch.squeeze(self.compressor(features))
+        features = features.view(-1)
         weight_res = self.gen(features)
-        weight_res = torch.unsqueeze(weight_res.permute(2, 0, 1), 0)
-        weight_res = F.interpolate(weight_res, size=[256, 256],mode="bilinear", align_corners=True)
         return weight_res
 
-def add_weight_res(nerf, res, hidden_layers=5, log_round=False, setup="train/"):
-    _, _, res_H, res_W = res.shape
+def add_weight_res(nerf, res, hidden_layers=5, log_round=False, setup="train/",
+                   std_scale=0.2):
     res *= 0.2
     logs = dict()
+    idx=0
     for i in range(hidden_layers):
         l = i*2+1
         weight_shape = nerf.net[l].weight.shape
-        layer_res = torch.unsqueeze(res[:, i, :, :], 1)
-        layer_res = F.interpolate(layer_res, weight_shape, mode="bilinear", align_corners=True)
+        c = 1
+        for x in weight_shape:
+            c *= x
+        layer_res = torch.unsqueeze(res[idx:idx+c], 1)
+        layer_res = layer_res.view(weight_shape)*std_scale
+        idx+=c
 
         if log_round:
-            # logs["layer" + str(l)] = wandb.Histogram(torch.flatten(nerf.net[l].weight.data.clone().detach().cpu()).numpy())
-            # logs["res" + str(l)] = wandb.Histogram(torch.flatten(layer_res.clone().detach().cpu()).numpy())
             logs[setup+"layer" + str(l) + "_weight_mean"] = torch.mean(nerf.net[l].weight.data)
             logs[setup+"layer" + str(l) + "_weight_std"] = torch.std(nerf.net[l].weight.data)
             logs[setup+"layer" + str(l) + "_res_mean"] = torch.mean(layer_res)
@@ -109,8 +112,5 @@ def add_weight_res(nerf, res, hidden_layers=5, log_round=False, setup="train/"):
         del nerf.net[l].weight
         nerf.net[l].weight = torch.squeeze(w)
 
-        #! create another NeRF datastructure, assign w to the new datastructure and return the new datastructure.
-
-        # layer_res_list.append(layer_res)
 
     return nerf, logs

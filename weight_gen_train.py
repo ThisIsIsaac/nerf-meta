@@ -94,7 +94,9 @@ def train_meta(args, epoch_idx, nerf_model, gen_model, gen_optim, data_loader, d
         nerf_model_copy = copy.deepcopy(nerf_model) #! copy meta model initialized weights
         weight_res = gen_model(imgs, relative_poses, bound)
 
-        nerf_model_copy, logs_weight_stat = add_weight_res(nerf_model_copy, weight_res, log_round=log_round, setup="train/")
+        nerf_model_copy, logs_weight_stat = \
+            add_weight_res(nerf_model_copy, weight_res, log_round=log_round,
+                           setup="train/", std_scale=args.std_scale)
         indices = torch.randint(num_rays, size=[args.train_batchsize])
         raybatch_o, raybatch_d = rays_o[indices], rays_d[indices]
         pixelbatch = pixels[indices]
@@ -175,8 +177,8 @@ def val_meta(args, epoch_idx, nerf_model, gen_model, val_loader, device):
         bound = batch["bound"]
         relative_poses = batch["relative_poses"]
 
-        imgs, poses, hwf, bound, relative_poses = imgs.to(device), poses.to(
-            device), hwf.to(device), bound.to(device), relative_poses.to(device)
+        imgs, poses, hwf, bound, relative_poses = imgs.to(device), poses.to(device), \
+                                                  hwf.to(device), bound.to(device), relative_poses.to(device)
         imgs, poses, hwf, bound, relative_poses = imgs.squeeze(), \
                                                   poses.squeeze(), \
                                                   hwf.squeeze(), \
@@ -196,9 +198,10 @@ def val_meta(args, epoch_idx, nerf_model, gen_model, val_loader, device):
         val_model = set_grad(val_model, False)
 
         with torch.no_grad():
-            weight_res = gen_model(imgs, relative_poses, bound)
-            val_model, logs_weight_stat = add_weight_res(val_model, weight_res,
-                                                         log_round=True, setup="val/")
+            weight_res = gen_model(imgs[:25], relative_poses[:25], bound[:25])
+            val_model, logs_weight_stat = \
+                add_weight_res(val_model, weight_res, log_round=True,
+                               setup="val/", std_scale=args.std_scale)
             indices = torch.randint(num_rays, size=[args.train_batchsize])
             raybatch_o, raybatch_d = rays_o[indices], rays_d[indices]
             pixelbatch = tto_pixels[indices]
@@ -276,6 +279,7 @@ def main():
                              'or lamps)')
     parser.add_argument('--debug_overfit_single_scene',  default=False,
                         action="store_true")
+    parser.add_argument("--std_scale", type=float, default=0.2)
     args = parser.parse_args()
 
     with open(args.config) as config:
@@ -299,11 +303,21 @@ def main():
                             num_views=args.tto_views+args.test_views)
     val_loader = DataLoader(val_set, batch_size=1, shuffle=False)
 
-    gen_model = WeightGenerator(args)
-    gen_model.to(device)
-    gen_model.feature_extractor.to(device)
     nerf_model = build_nerf(args)
     nerf_model.to(device)
+
+    out_channel = 0
+    for l in nerf_model.net:
+        if hasattr(l, "weight"):
+            c = 1
+            for x in l.weight.shape:
+                c *= x
+            out_channel += c
+
+    gen_model = WeightGenerator(args, out_channel=out_channel)
+    gen_model.to(device)
+    gen_model.feature_extractor.to(device)
+
     gen_optim = torch.optim.Adam(gen_model.gen.parameters(), lr=args.meta_lr)
 
     print("Training set: " + str(len(train_loader)) + " images" )
@@ -336,6 +350,7 @@ def main():
         raise ValueError()
 
     wandb.watch(gen_model.gen, log="all", log_freq=100)
+    # val_meta(args, 99, nerf_model, gen_model, val_loader, device)
     for epoch in range(1, args.meta_epochs+1):
         print("Epoch " + str(epoch) + " training...")
         train_meta(args, epoch, nerf_model, gen_model, gen_optim, train_loader, device, ref_state_dict=nerf_checkpoint)
