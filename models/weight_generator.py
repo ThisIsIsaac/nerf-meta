@@ -5,7 +5,6 @@ import torchvision.models as models
 from models.nerf import build_nerf
 from torchvision import transforms
 from models.mvsnerf import MVSNet
-import matplotlib.pyplot as plt
 import wandb
 
 class WeightGenerator(nn.Module):
@@ -13,39 +12,45 @@ class WeightGenerator(nn.Module):
         """Load the pretrained ResNet-152 and replace top fc layer."""
         # source: https://github.com/yunjey/pytorch-tutorial/blob/0500d3df5a2a8080ccfccbc00aca0eacc21818db/tutorials/03-advanced/image_captioning/model.py#L9
         super(WeightGenerator, self).__init__()
-        self.feature_extractor_type = args.feature_extractor_type
-        if args.feature_extractor_type == "resnet":
+        self.feature_extractor_type = args.feat.feature_extractor_type
+        if args.feat.feature_extractor_type == " vgg":
             feature_extractor = models.vgg16_bn(pretrained=True)
-            feature_extractor.requires_grad_(False)
-            feature_extractor.eval()
+            feature_extractor.requires_grad_(True)
+            feature_extractor.train()
             self.feature_extractor = list(feature_extractor.children())[:-2][0]
             self.extraction_layers = [5, 12, 22, 32, 42]
+
             # Image preprocessing, normalization for the pretrained resnet
             # source: https://github.com/yunjey/pytorch-tutorial/blob/0500d3df5a2a8080ccfccbc00aca0eacc21818db/tutorials/03-advanced/image_captioning/train.py#L22
-            self.transform = transforms.Compose([
-                transforms.Normalize((0.485, 0.456, 0.406),
-                                     (0.229, 0.224, 0.225))
-            ])
+            # self.transform = transforms.Compose([
+            #     transforms.Normalize((0.485, 0.456, 0.406),
+            #                          (0.229, 0.224, 0.225))
+            # ])
             self.compressor = nn.Sequential(
-                nn.Conv3d(25, 8, kernel_size=7, stride=4, padding=3), nn.ReLU())
+                nn.Conv3d(25, 8, kernel_size=7, stride=2, padding=3), nn.ReLU())
+            self.in_channel = 753664
 
-        elif args.feature_extractor_type == "mvsnet":
-            self.feature_extractor = MVSNet().requires_grad_(False)
-            self.feature_extractor.eval()
-            self.transform = transforms.Compose([transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                                    std=[0.229, 0.224, 0.225]),
-                                        ])
+        elif args.feat.feature_extractor_type == "mvsnet":
+            self.feature_extractor = MVSNet().requires_grad_(True)
+            self.feature_extractor.train()
+            # self.transform = transforms.Compose([transforms.Normalize(mean=[0.485, 0.456, 0.406],
+            #                                         std=[0.229, 0.224, 0.225]),
+            #                             ])
+
+            comp_in_channel = 8
+            #* number of channel per voxel is doubled everytime the spatial dimensions (D x H x W) are halved.
+            #* spatial dimensions are halved until 4x4x4
             self.compressor = nn.Sequential(
-                nn.Conv3d(8, 4, kernel_size=7, stride=2, padding=3), nn.ReLU())
+                nn.Conv3d(comp_in_channel, comp_in_channel*2, kernel_size=5, stride=2, padding=2), nn.ReLU(),
+                nn.Conv3d(comp_in_channel*2, comp_in_channel*4, kernel_size=5,stride=2, padding=2), nn.ReLU(),
+                nn.Conv3d(comp_in_channel*4, comp_in_channel * 8, kernel_size=5, stride=2,padding=2), nn.ReLU(),
+                nn.Conv3d(comp_in_channel * 8, comp_in_channel * 16, kernel_size=5, stride=2,padding=2), nn.ReLU(),
+                nn.Conv3d(comp_in_channel * 16, comp_in_channel * 16, kernel_size=3, stride=2,padding=1), nn.ReLU())
+            self.in_channel = (comp_in_channel * 16) * 4 * 4 * 4
 
-
-
-
-        # self.hidden_features = args.hidden_features
-        self.num_layers = args.hidden_layers+1
+        self.num_layers = args.nerf.hidden_layers+1
         self.out_channel = out_channel
         self.hidden_channel=256
-        self.in_channel = 753664 if self.feature_extractor_type == "resnet" else (6553600//16)
 
         self.gen = \
             nn.Sequential(
@@ -63,9 +68,9 @@ class WeightGenerator(nn.Module):
         """Extract feature vectors from input images."""
         # source: https://github.com/yunjey/pytorch-tutorial/blob/0500d3df5a2a8080ccfccbc00aca0eacc21818db/tutorials/03-advanced/image_captioning/model.py#L18
         imgs = imgs.permute(0, 3, 1, 2)
-        imgs = self.transform(imgs)
+        # imgs = self.transform(imgs)
 
-        if self.feature_extractor_type == "resnet":
+        if self.feature_extractor_type == "vgg":
             features=[]
             with torch.no_grad():
                 feat=imgs
@@ -85,7 +90,7 @@ class WeightGenerator(nn.Module):
         weight_res = self.gen(features)
         return weight_res
 
-def add_weight_res(nerf, res, hidden_layers=5, log_round=False, setup="train/",
+def add_weight_res(nerf, res, hidden_layers=6, log_round=False, setup="train/",
                    std_scale=0.2):
     res *= 0.2
     logs = dict()

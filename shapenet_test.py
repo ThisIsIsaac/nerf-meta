@@ -9,7 +9,7 @@ from models.nerf import build_nerf
 from utils.shape_video import create_360_video
 from models.rendering import get_rays_shapenet, sample_points, volume_render
 import wandb
-
+import logging
 
 def test_time_optimize(args, model, optim, imgs, poses, hwf, bound):
     """
@@ -67,7 +67,7 @@ def report_result(args, model, imgs, poses, hwf, bound):
 
 
 def test(args):
-    print("running test weights: " + args.weight_path)
+    logging.info("running test weights: " + args.weight_path)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     test_set = build_shapenet(image_set="test", dataset_root=args.dataset_root,
@@ -158,15 +158,14 @@ def test(args):
         wandb.log({"test/vid_step_" + str(args.tto_steps): wandb.Video(
             vid_frames.transpose(0, 3, 1, 2), fps=30, format="mp4")})
 
-        print(f"scene {idx+1}, psnr:{scene_psnr:.3f}, video created")
+        logging.info(f"scene {idx+1}, psnr:{scene_psnr:.3f}, video created")
         wandb.log({"test/scene_psnr_" + str(args.tto_steps): scene_psnr})
         test_psnrs.append(scene_psnr)
     
     test_psnrs = torch.stack(test_psnrs)
     psnr_mean = test_psnrs.mean()
     wandb.save(str(savedir))
-    print("----------------------------------")
-    print(f"test dataset mean psnr: " + str(psnr_mean))
+    logging.info(f"test dataset mean psnr: " + str(psnr_mean))
 
 
 
@@ -184,7 +183,7 @@ if __name__ == '__main__':
         for key, value in info.items():
             args.__dict__[key] = value
 
-    wandb.init(name=args.exp_name + "_test", dir="/root/nerf-meta-main/", project="meta_NeRF", entity="stereo",
+    wandb.init(name=args.exp_name + "_test", dir="/root/nerf-meta/", project="meta_NeRF", entity="stereo",
                save_code=True, job_type="train")
 
     wandb.config.update(args)

@@ -6,6 +6,7 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from models.rendering import get_rays_shapenet, sample_points, volume_render
 import numpy as np
+from PIL import Image
 
 class ShapenetDatasetV2(Dataset):
     """
@@ -25,6 +26,11 @@ class ShapenetDatasetV2(Dataset):
         self.debug_overfit_single_scene = False
         if getattr(args, "debug_overfit_single_scene")== True:
             self.debug_overfit_single_scene = True
+        self.transform = transforms.Compose(
+            [transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                  std=[0.229, 0.224, 0.225]),
+             ])
 
 
     def __getitem__(self, idx):
@@ -43,7 +49,9 @@ class ShapenetDatasetV2(Dataset):
             img_name = f"{Path(frame['file_path']).stem}.png"
             img_path = folderpath.joinpath(img_name)
             img = imageio.imread(img_path)
-            imgs.append(torch.as_tensor(img, dtype=torch.float))
+            # img2 = Image.open(img_path)
+            img = self.transform(img).type(torch.float)
+            imgs.append(img.permute(1, 2, 0))
 
             pose = frame["transform_matrix"]
             poses.append(torch.as_tensor(pose, dtype=torch.float))
@@ -52,7 +60,7 @@ class ShapenetDatasetV2(Dataset):
         # composite the images to a white background
         imgs = imgs[..., :3] * imgs[..., -1:] + 1 - imgs[...,
                                                     -1:]
-
+        # imgs = self.transform(imgs)
         poses = torch.stack(poses, dim=0)
 
         # all images of a scene has the same camera intrinsics

@@ -1,0 +1,5 @@
+# @package _group_
+name: "vgg"
+feature_extractor_type: "vgg"
+std_scale: 0.2
+use_reptile_loss: False

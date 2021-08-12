@@ -2,7 +2,7 @@ import math
 import imageio
 import torch
 from models.rendering import get_rays_shapenet, sample_points, volume_render
-
+import os
 
 def create_posemat(radius, theta, phi):
     """
@@ -83,7 +83,8 @@ def create_360_video(args, model, hwf, bound, device, scene_id, savedir, step=2)
     video_frames = torch.stack(video_frames, dim=0)
     video_frames = video_frames.cpu().numpy()
 
-    video_path = savedir.joinpath(f"{scene_id}_step_"+ str(step)+".mp4")
+    os.makedirs(savedir, exist_ok=True)
+    video_path = os.path.join(savedir, f"{scene_id}_step_"+ str(step)+".mp4")
     imageio.mimwrite(video_path, video_frames, fps=30)
 
     return video_frames

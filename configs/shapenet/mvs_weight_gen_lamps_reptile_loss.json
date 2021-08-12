@@ -1,11 +1,13 @@
 {
-    "exp_name": "mvs_weight_gen_shapenet_lamps",
+    "exp_name": "mvs_weight_gen_reptile_loss_shapenet_lamps",
     "dataset_root": "/data/private/metaNeRF_datasets/shapenet/03636649",
     "splits_path": "/data/private/metaNeRF_datasets/shapenet/lamp_splits.json",
     "nerf_weight_path": "./ckpts/shapenet_lamps_fin.pth",
     "mvsnet_weight_path": "/root/mvsnerf/ckpts/mvsnerf-v0.tar",
     "log_interval": 100,
     "save_dir": "/data/private/logs/meta-nerf/weight_gen",
+    "use_reptile_loss": true,
+    "reptile_loss_weight": 1000,
 
     "max_freq": 8,
     "num_freqs": 20,
@@ -15,6 +17,7 @@
     "feature_extractor_type": "mvsnet",
     "save_dir": "/data/private/logs/meta-nerf/mvs_weight_gen",
     "weight_gen_views": 3,
+
     "encoding_method": "positional_encoding",
     "train_views": 25,
     "meta_epochs": 45,
@@ -22,8 +25,6 @@
     "train_batchsize": 128,
     "num_samples": 128,
     "nerf_hidden_layers": 6,
-    "reptile_loss_weight": 1000,
-
 
     "inner_lr": 0.5,
     "inner_steps": 32,

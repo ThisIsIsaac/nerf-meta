@@ -1,4 +1,3 @@
-from pathlib import Path
 import argparse
 import json
 import torch
@@ -11,6 +10,8 @@ from utils.shape_video import create_360_video
 from models.rendering import get_rays_shapenet, sample_points, volume_render
 import wandb
 import copy
+import logging
+import os
 
 def test_time_optimize(args, model, optim, imgs, poses, hwf, bound):
     """
@@ -47,15 +48,15 @@ def report_result(args, model, imgs, poses, hwf, bound):
     for img, rays_o, rays_d in zip(imgs, ray_origins, ray_directions):
         rays_o, rays_d = rays_o.reshape(-1, 3), rays_d.reshape(-1, 3)
         t_vals, xyz = sample_points(rays_o, rays_d, bound[0], bound[1],
-                                    args.num_samples, perturb=False)
+                                    args.nerf.num_samples, perturb=False)
         
         synth = []
         num_rays = rays_d.shape[0]
         with torch.no_grad():
-            for i in range(0, num_rays, args.test_batchsize):
-                rgbs_batch, sigmas_batch = model(xyz[i:i+args.test_batchsize])
+            for i in range(0, num_rays, args.nerf.test_batchsize):
+                rgbs_batch, sigmas_batch = model(xyz[i:i+args.nerf.test_batchsize])
                 color_batch = volume_render(rgbs_batch, sigmas_batch,
-                                            t_vals[i:i+args.test_batchsize],
+                                            t_vals[i:i+args.nerf.test_batchsize],
                                             white_bkgd=True)
                 synth.append(color_batch)
             synth = torch.cat(synth, dim=0).reshape_as(img)
@@ -68,16 +69,16 @@ def report_result(args, model, imgs, poses, hwf, bound):
 
 
 def test(args, nerf_model=None, gen_model=None, epoch_idx=1):
-    print("testing...")
+    logging.info("testing...")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    test_set = build_shapenetV2(args, image_set="test", dataset_root=args.dataset_root,
-                            splits_path=args.splits_path,
-                            num_views=args.tto_views+args.test_views)
+    test_set = build_shapenetV2(args, image_set="test", dataset_root=args.data.dataset_root,
+                            splits_path=args.data.splits_path,
+                            num_views=args.nerf.tto_views+args.nerf.test_views)
     test_loader = DataLoader(test_set, batch_size=1, shuffle=False)
 
     nerf_state = copy.deepcopy(nerf_model.state_dict())
-    savedir = args.savedir
+    savedir = os.get_cwd()
     savedir.mkdir(exist_ok=True)
     
     test_psnrs = []
@@ -96,8 +97,8 @@ def test(args, nerf_model=None, gen_model=None, epoch_idx=1):
                                                   hwf.squeeze(), \
                                                   bound.squeeze(), relative_poses.squeeze()
 
-        tto_imgs, test_imgs = torch.split(imgs, [args.tto_views, args.test_views], dim=0)
-        tto_poses, test_poses = torch.split(poses, [args.tto_views, args.test_views], dim=0)
+        tto_imgs, test_imgs = torch.split(imgs, [args.nerf.tto_views, args.nerf.test_views], dim=0)
+        tto_poses, test_poses = torch.split(poses, [args.nerf.tto_views, args.nerf.test_views], dim=0)
         tto_pixels = tto_imgs.reshape(-1, 3)
         rays_o, rays_d = get_rays_shapenet(hwf, tto_poses)
         rays_o, rays_d = rays_o.reshape(-1, 3), rays_d.reshape(-1, 3)
@@ -114,30 +115,28 @@ def test(args, nerf_model=None, gen_model=None, epoch_idx=1):
         with torch.no_grad():
             weight_res = gen_model(imgs, relative_poses, bound)
             test_nerf_model, logs_weight_stat = add_weight_res(test_nerf_model, weight_res,
-                                                                hidden_features=args.hidden_features,
-                                                                out_features=args.out_features,
                                                                 log_round=True, setup="test/")
-            indices = torch.randint(num_rays, size=[args.train_batchsize])
+            indices = torch.randint(num_rays, size=[args.nerf.train_batchsize])
             raybatch_o, raybatch_d = rays_o[indices], rays_d[indices]
             pixelbatch = tto_pixels[indices]
             t_vals, xyz = sample_points(raybatch_o, raybatch_d, bound[0],
                                         bound[1],
-                                        args.num_samples, perturb=True)
+                                        args.nerf.num_samples, perturb=True)
             rgbs, sigmas = test_nerf_model(xyz)
             colors = volume_render(rgbs, sigmas, t_vals, white_bkgd=True)
             test_loss = F.mse_loss(colors, pixelbatch)
 
         inner_val_model = copy.deepcopy(test_nerf_model)
         inner_val_model = set_grad(inner_val_model, True)
-        nerf_optim = torch.optim.SGD(inner_val_model.parameters(), args.tto_lr)
+        nerf_optim = torch.optim.SGD(inner_val_model.parameters(), args.nerf.tto_lr)
 
         #! function body of "test_time_optimize"
 
         has_recorded_without_tto = False
 
-        for step in range(args.tto_steps):
+        for step in range(args.nerf.tto_steps):
             #* log output on every iteration
-            if step % args.tto_log_steps == 0:
+            if step % args.nerf.tto_log_steps == 0:
                 if step == 0:
                     if has_recorded_without_tto == False:
                         with torch.no_grad():
@@ -145,7 +144,7 @@ def test(args, nerf_model=None, gen_model=None, epoch_idx=1):
                                                        bound)
 
 
-                            vid_frames = create_360_video(args, inner_val_model, hwf, bound, device,
+                            vid_frames = create_360_video(args.nerf, inner_val_model, hwf, bound, device,
                                                           idx + 1, savedir) #, step=step
 
                             logs["test/test_scene_psnr_step=" + str(step)] = scene_psnr
@@ -160,7 +159,7 @@ def test(args, nerf_model=None, gen_model=None, epoch_idx=1):
                                                    test_poses, hwf,
                                                    bound)
 
-                        vid_frames = create_360_video(args, inner_val_model, hwf, bound,
+                        vid_frames = create_360_video(args.nerf, inner_val_model, hwf, bound,
                                                       device,
                                                       idx + 1, savedir) # , step=step
                         logs["test/test_scene_psnr_step=" + str(step)] = scene_psnr
@@ -188,13 +187,13 @@ def test(args, nerf_model=None, gen_model=None, epoch_idx=1):
         with torch.no_grad():
             scene_psnr = report_result(args, inner_val_model, test_imgs, test_poses, hwf,
                                        bound)
-            vid_frames = create_360_video(args, inner_val_model, hwf, bound, device, idx + 1,
+            vid_frames = create_360_video(args.nerf, inner_val_model, hwf, bound, device, idx + 1,
                                           savedir) #, step=args.tto_steps
             logs["test/test_scene_psnr_step=" + str(args.tto_steps)] = scene_psnr
             logs["test/test_vid_step=" + str(args.tto_steps)] = \
                 wandb.Video(vid_frames.transpose(0, 3, 1, 2), fps=30, format="mp4")
 
-        print(f"scene {idx+1}, psnr:{scene_psnr:.3f}, video created")
+        logging.info(f"scene {idx+1}, psnr:{scene_psnr:.3f}, video created")
         wandb.log({**logs, **logs_weight_stat, "test_step":test_step})
         test_step+=1
 
@@ -204,8 +203,8 @@ def test(args, nerf_model=None, gen_model=None, epoch_idx=1):
     psnr_mean = test_psnrs.mean()
     wandb.log({"test/mean_psnr":psnr_mean})
     wandb.save(str(savedir))
-    print("----------------------------------")
-    print(f"test dataset mean psnr: " + str(psnr_mean))
+
+    logging.info(f"test dataset mean psnr: " + str(psnr_mean))
 
 
 
@@ -223,9 +222,9 @@ if __name__ == '__main__':
         for key, value in info.items():
             args.__dict__[key] = value
 
-    wandb.init(name=args.exp_name + "_test", dir="/root/nerf-meta-main/", project="meta_NeRF", entity="stereo",
+    wandb.init(name=args.exp_name + "_test", dir="/root/nerf-meta/", project="meta_NeRF", entity="stereo",
                save_code=True, job_type="train")
 
     wandb.config.update(args)
-    print("running test with weights at path: " + args.weight_path)
+    logging.info("running test with weights at path: " + args.weight_path)
     test(args)

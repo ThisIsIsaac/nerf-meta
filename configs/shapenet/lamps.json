@@ -2,6 +2,7 @@
     "exp_name": "shapenet_lamps",
     "dataset_root": "/data/private/metaNeRF_datasets/shapenet/03636649",
     "splits_path": "/data/private/metaNeRF_datasets/shapenet/lamp_splits.json",
+    "save_dir": "/data/private/logs/meta-nerf/lamp_baseline",
 
     "max_freq": 8,
     "num_freqs": 20,

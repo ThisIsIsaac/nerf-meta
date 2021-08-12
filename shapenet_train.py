@@ -17,6 +17,13 @@ traceback.install()
 from torchvision.utils import make_grid
 from utils.shape_video import create_360_video
 from pathlib import Path
+import numpy as np
+import random
+SEED=42
+torch.manual_seed(SEED)
+random.seed(SEED)
+np.random.seed(SEED)
+import logging
 
 def inner_loop(args, model, optim, imgs, poses, hwf, bound, num_samples, raybatch_size, inner_steps,
                device, idx, log_round=False, setup="train/"):
@@ -67,6 +74,8 @@ def train_meta(args, epoch_idx, meta_model, meta_optim, data_loader, device):
     """
 
     step = (epoch_idx - 1) * len(data_loader)
+    avg_psnr = 0
+    psnr_accum = dict()
     for idx,(imgs, poses, hwf, bound) in enumerate(data_loader):
         log_round = (step % args.log_interval == 0)
         imgs, poses, hwf, bound = imgs.to(device), poses.to(device), hwf.to(device), bound.to(device)
@@ -86,9 +95,25 @@ def train_meta(args, epoch_idx, meta_model, meta_optim, data_loader, device):
             for meta_param, inner_param in zip(meta_model.parameters(), inner_model.parameters()):
                 meta_param.grad = meta_param - inner_param
         meta_optim.step()
+
         if log_round:
+            avg_psnr += logs["train/scene_psnr tto_step=" + str(args.inner_steps)]
+            # logs["train/gen_model_mse_loss"] = float(loss)
+            logs = {**logs,  "train_step": step,
+                    "train/imgs": wandb.Image(
+                        make_grid(imgs.permute(0, 3, 1, 2)))}
             wandb.log(logs)
+            for (key, val) in logs.items():
+                if "psnr" in key:
+                    if psnr_accum.get(key) is None:
+                        psnr_accum[key] = 0
+                    psnr_accum[key] += val
         step+=1
+    psnr_mean = dict()
+    for (key, val) in psnr_accum.items():
+        psnr_mean[key + "_mean"] = val / len(data_loader)
+    avg_psnr /= len(data_loader)
+    wandb.log({**psnr_mean, "val/avg_psnr": avg_psnr, "epoch_step": epoch_idx})
 
 
 def report_result(model, imgs, poses, hwf, bound, num_samples, raybatch_size):
@@ -121,13 +146,15 @@ def report_result(model, imgs, poses, hwf, bound, num_samples, raybatch_size):
     return scene_psnr
 
 
-def val_meta(args, model, val_loader, device):
+def val_meta(args, epoch_idx, model, val_loader, device):
     """
     validate the meta trained model for few-shot view synthesis
     """
     meta_trained_state = model.state_dict()
     val_model = copy.deepcopy(model)
-
+    avg_psnr = 0
+    psnr_accum = dict()
+    val_step = max((epoch_idx - 1) * len(val_loader) + 1, 0)
     for idx, (imgs, poses, hwf, bound) in enumerate(val_loader):
         imgs, poses, hwf, bound = imgs.to(device), poses.to(device), hwf.to(device), bound.to(device)
         imgs, poses, hwf, bound = imgs.squeeze(), poses.squeeze(), hwf.squeeze(), bound.squeeze()
@@ -142,13 +169,25 @@ def val_meta(args, model, val_loader, device):
                     bound, args.num_samples, args.tto_batchsize, args.tto_steps,
                     device=device, idx=idx, log_round=True, setup="val/")
 
+        avg_psnr += logs["val/scene_psnr tto_step=" + str(args.tto_steps)]
         logs["val/tto_views"] = wandb.Image(
             make_grid(tto_imgs.permute(0, 3, 1, 2)))
         logs["val/test_views"] = wandb.Image(
             make_grid(test_imgs.permute(0, 3, 1, 2)))
+        logs["val_step"] = val_step
         wandb.log(logs)
+        for (key,val) in logs.items():
+            if "psnr" in key:
+                if psnr_accum.get(key) is None:
+                    psnr_accum[key] = 0
+                psnr_accum[key] += val
+        val_step+=1
 
-
+    psnr_mean = dict()
+    for (key,val) in psnr_accum.items():
+        psnr_mean[key+"_mean"] = val/len(val_loader)
+    avg_psnr /= len(val_loader)
+    wandb.log({**psnr_mean, "val/avg_psnr":avg_psnr, "epoch_step":epoch_idx})
 
 def main():
     parser = argparse.ArgumentParser(description='shapenet few-shot view synthesis')
@@ -162,7 +201,7 @@ def main():
         for key, value in info.items():
             args.__dict__[key] = value
     args.savedir = Path(args.savedir)
-    wandb.init(name="train_"+args.exp_name, dir="/root/nerf-meta-main/", project="meta_NeRF", entity="stereo",
+    wandb.init(name="train_"+args.exp_name, dir="/root/nerf-meta/", project="meta_NeRF", entity="stereo",
                save_code=True, job_type="train")
 
     wandb.config.update(args)
@@ -187,15 +226,15 @@ def main():
         meta_model.load_state_dict(meta_state)
 
     meta_optim = torch.optim.Adam(meta_model.parameters(), lr=args.meta_lr)
-    print("starting to train...")
+    logging.info("starting to train...")
 
-
+    val_meta(args, 0, meta_model, val_loader, device)
     for epoch in range(1, args.meta_epochs+1):
-        print("Epoch: " + str(epoch))
+        logging.info("Epoch: " + str(epoch))
         train_meta(args, epoch, meta_model, meta_optim, train_loader, device)
-        val_meta(args, meta_model, val_loader, device)
+        val_meta(args, epoch, meta_model, val_loader, device)
 
-        ckpt_name = "./"+args.exp_name+"_epoch" + str(epoch) + ".pth"
+        ckpt_name = args.save_dir + "/"+args.exp_name+"_epoch" + str(epoch) + ".pth"
         torch.save({
             'epoch': epoch,
             'meta_model_state_dict': meta_model.state_dict(),

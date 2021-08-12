@@ -7,7 +7,7 @@ from datasets.phototourism import build_tourism
 from models.nerf import build_nerf
 from models.rendering import get_rays_tourism, sample_points, volume_render
 from utils.tour_video import create_interpolation_video
-
+import logging
 
 def inner_loop(model, optim, img, rays_o, rays_d, bound, num_samples, raybatch_size, inner_steps):
     """
@@ -102,16 +102,16 @@ def test():
         psnr = report_result(model, test_img, test_rays_o, test_rays_d, bound, 
                             args.num_samples, args.test_batchsize)
         
-        print(f"test view {idx+1}, psnr:{psnr:.3f}")
+        logging.info(f"test view {idx+1}, psnr:{psnr:.3f}")
         test_psnrs.append(psnr)
 
     test_psnrs = torch.stack(test_psnrs)
-    print("----------------------------------")
-    print(f"test dataset mean psnr: {test_psnrs.mean():.3f}")
 
-    print("\ncreating interpolation video ...\n")
+    logging.info(f"test dataset mean psnr: {test_psnrs.mean():.3f}")
+
+    logging.info("\ncreating interpolation video ...\n")
     create_interpolation_video(args, model, meta_state_dict, test_set, device)
-    print("\ninterpolation video created!")
+    logging.info("\ninterpolation video created!")
 
 
 if __name__ == '__main__':

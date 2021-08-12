@@ -1,0 +1,23 @@
+# @package _global_
+
+
+hydra:
+  run:
+    dir: /data/private/logs/${hydra.job.name}/${now:%Y-%m-%d_%H-%M-%S}
+  sweep:
+    dir: /data/private/logs/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+log_interval: 100
+savedir: "./videos"
+exp_name: "weight_gen_reptile_loss_shapenet_lamps"
+debug_overfit_single_scene: False
+val_per_scene: 4
+
+defaults:
+  - data: shapenet_lamp
+  - nerf: nerf
+  - feat: mvsnerf
+  - override hydra/job_logging: colorlog
+  - override hydra/hydra_logging: colorlog
+#  - override hydra/run/dir: /data/private/logs/${hydra.job.name}/${now:%Y-%m-%d_%H-%M-%S}
+#  - override hydra/sweep/dir: /data/private/logs/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}

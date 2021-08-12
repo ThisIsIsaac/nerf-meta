@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from datasets.phototourism import build_tourism
 from models.nerf import build_nerf
 from models.rendering import get_rays_tourism, sample_points, volume_render
-
+import logging
 
 def inner_loop(model, optim, img, rays_o, rays_d, bound, num_samples, raybatch_size, inner_steps):
     """
@@ -142,7 +142,7 @@ def main():
     for epoch in range(1, args.meta_epochs+1):
         train_meta(args, meta_model, meta_optim, train_loader, device)
         val_psnr = val_meta(args, meta_model, val_loader, device)
-        print(f"Epoch: {epoch}, val psnr: {val_psnr:0.3f}")
+        logging.info(f"Epoch: {epoch}, val psnr: {val_psnr:0.3f}")
 
         torch.save({
             'epoch': epoch,

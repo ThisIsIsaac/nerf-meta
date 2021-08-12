@@ -1,0 +1,7 @@
+# @package _group_
+name: "mvsnet"
+feature_extractor_type: "mvsnet"
+weight_gen_views: 3
+mvsnet_weight_path: "/root/mvsnerf/ckpts/mvsnerf-v0.tar"
+std_scale: 0.2
+use_reptile_loss: False

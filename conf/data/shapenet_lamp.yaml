@@ -1,0 +1,8 @@
+# @package _group_
+name: shapenet_lamp
+dataset_root: /data/private/metaNeRF_datasets/shapenet/03636649
+splits_path: /data/private/metaNeRF_datasets/shapenet/lamp_splits.json
+nerf_weight_path: /root/nerf-meta/ckpts/shapenet_lamps_fin.pth
+"img_resize_h": 224,
+"img_resize_w": 224,
+val_per_scene: 5

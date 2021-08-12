@@ -420,10 +420,10 @@ def create_nerf_mvs(args, pts_embedder=True, use_mvs=False, dir_embedder=True):
     if args.ckpt is not None and args.ckpt != 'None':
         ckpts = [args.ckpt]
 
-    print('Found ckpts', ckpts)
+    logging.info('Found ckpts', ckpts)
     if len(ckpts) > 0 :
         ckpt_path = ckpts[-1]
-        print('Reloading from', ckpt_path)
+        logging.info('Reloading from', ckpt_path)
         ckpt = torch.load(ckpt_path)
 
         # Load model

@@ -150,7 +150,7 @@ def create_interpolation_video(args, model, meta_state_dict, test_set, device):
         synth_views = interpolate_views(args, model, prev, next)
         video_frames.extend(synth_views)
         
-        print(f"test view {prev['view_idx']} and {next['view_idx']} interpolated")
+        logging.info(f"test view {prev['view_idx']} and {next['view_idx']} interpolated")
 
         prev = next
         heights.append(prev['H'])
