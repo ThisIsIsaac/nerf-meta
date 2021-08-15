@@ -6,6 +6,8 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from models.rendering import get_rays_shapenet, sample_points, volume_render
 import numpy as np
+from PIL import Image
+import numpy as np
 
 class ShapenetDatasetV2(Dataset):
     """
@@ -27,8 +29,8 @@ class ShapenetDatasetV2(Dataset):
             self.debug_overfit_single_scene = True
         self.transform = transforms.Compose(
             [transforms.ToTensor(),
-             transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                  std=[0.229, 0.224, 0.225]),
+             # transforms.Normalize(mean=[0.485, 0.456, 0.406],
+             #                      std=[0.229, 0.224, 0.225]),
              ])
 
     def __getitem__(self, idx):
@@ -46,17 +48,16 @@ class ShapenetDatasetV2(Dataset):
 
             img_name = f"{Path(frame['file_path']).stem}.png"
             img_path = folderpath.joinpath(img_name)
-            img = imageio.imread(img_path)
-            img = self.transform(img).type(torch.float)
-            imgs.append(img.permute(1, 2, 0))
+            img = Image.open(img_path)
+            imgs.append(self.transform(img).permute(1, 2, 0))
 
             pose = frame["transform_matrix"]
             poses.append(torch.as_tensor(pose, dtype=torch.float))
 
-        imgs = torch.stack(imgs, dim=0) / 255.
+        imgs = torch.stack(imgs, dim=0)
+
         # composite the images to a white background
-        imgs = imgs[..., :3] * imgs[..., -1:] + 1 - imgs[...,
-                                                    -1:]
+        imgs = imgs[..., :3] * imgs[..., -1:] + 1 - imgs[...,-1:]
 
         poses = torch.stack(poses, dim=0)
 

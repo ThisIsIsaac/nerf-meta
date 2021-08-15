@@ -223,7 +223,7 @@ if __name__ == '__main__':
         for key, value in info.items():
             args.__dict__[key] = value
 
-    wandb.init(name=args.exp_name + "_test", dir="/root/nerf-meta-main/", project="meta_NeRF", entity="stereo",
+    wandb.init(name=args.exp_name + "_test", dir="/data/private/logs/metaNeRF/", project="meta_NeRF", entity="stereo",
                save_code=True, job_type="train")
 
     wandb.config.update(args)

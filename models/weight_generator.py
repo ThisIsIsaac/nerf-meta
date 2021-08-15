@@ -14,32 +14,26 @@ class WeightGenerator(nn.Module):
         # source: https://github.com/yunjey/pytorch-tutorial/blob/0500d3df5a2a8080ccfccbc00aca0eacc21818db/tutorials/03-advanced/image_captioning/model.py#L9
         super(WeightGenerator, self).__init__()
         self.feature_extractor_type = args.feature_extractor_type
+        self.transform = transforms.Compose(
+            [   transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                  std=[0.229, 0.224, 0.225]),
+             ])
+
         if args.feature_extractor_type == "resnet":
             feature_extractor = models.vgg16_bn(pretrained=True)
             feature_extractor.requires_grad_(False)
             feature_extractor.eval()
             self.feature_extractor = list(feature_extractor.children())[:-2][0]
             self.extraction_layers = [5, 12, 22, 32, 42]
-            # Image preprocessing, normalization for the pretrained resnet
-            # source: https://github.com/yunjey/pytorch-tutorial/blob/0500d3df5a2a8080ccfccbc00aca0eacc21818db/tutorials/03-advanced/image_captioning/train.py#L22
-            self.transform = transforms.Compose([
-                transforms.Normalize((0.485, 0.456, 0.406),
-                                     (0.229, 0.224, 0.225))
-            ])
             self.compressor = nn.Sequential(
                 nn.Conv3d(25, 8, kernel_size=7, stride=4, padding=3), nn.ReLU())
 
         elif args.feature_extractor_type == "mvsnet":
             self.feature_extractor = MVSNet().requires_grad_(False)
             self.feature_extractor.eval()
-            self.transform = transforms.Compose([transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                                    std=[0.229, 0.224, 0.225]),
-                                        ])
             self.compressor = nn.Sequential(
                 nn.Conv3d(8, 4, kernel_size=7, stride=2, padding=3), nn.ReLU())
-
-
-
 
         # self.hidden_features = args.hidden_features
         self.num_layers = args.hidden_layers+1
@@ -63,6 +57,8 @@ class WeightGenerator(nn.Module):
         """Extract feature vectors from input images."""
         # source: https://github.com/yunjey/pytorch-tutorial/blob/0500d3df5a2a8080ccfccbc00aca0eacc21818db/tutorials/03-advanced/image_captioning/model.py#L18
         imgs = imgs.permute(0, 3, 1, 2)
+        imgs = transforms.functional.normalize(imgs, mean=[0.485, 0.456, 0.406],
+                                  std=[0.229, 0.224, 0.225])
         # imgs = self.transform(imgs)
 
         if self.feature_extractor_type == "resnet":

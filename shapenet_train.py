@@ -162,7 +162,7 @@ def main():
         for key, value in info.items():
             args.__dict__[key] = value
     args.savedir = Path(args.savedir)
-    wandb.init(name="train_"+args.exp_name, dir="/root/nerf-meta-main/", project="meta_NeRF", entity="stereo",
+    wandb.init(name="train_"+args.exp_name, dir="/data/private/logs/metaNeRF/", project="meta_NeRF", entity="stereo",
                save_code=True, job_type="train")
 
     wandb.config.update(args)

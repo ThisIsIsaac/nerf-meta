@@ -287,7 +287,7 @@ def main():
         for key, value in info.items():
             args.__dict__[key] = value
     args.savedir = Path(args.savedir)
-    wandb.init(name="train_"+args.exp_name, dir="/root/nerf-meta-main/", project="meta_NeRF", entity="stereo",
+    wandb.init(name="train_"+args.exp_name, dir="/data/private/logs/metaNeRF/", project="meta_NeRF", entity="stereo",
                save_code=True, job_type="train")
 
     wandb.config.update(args)
@@ -350,7 +350,8 @@ def main():
         raise ValueError()
 
     wandb.watch(gen_model.gen, log="all", log_freq=100)
-    # val_meta(args, 99, nerf_model, gen_model, val_loader, device)
+    wandb.watch(gen_model.feature_extractor, log="all", log_freq=100)
+    val_meta(args, 99, nerf_model, gen_model, val_loader, device)
     for epoch in range(1, args.meta_epochs+1):
         print("Epoch " + str(epoch) + " training...")
         train_meta(args, epoch, nerf_model, gen_model, gen_optim, train_loader, device, ref_state_dict=nerf_checkpoint)
