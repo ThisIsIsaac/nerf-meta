@@ -79,26 +79,26 @@ def inner_loop(args, nerf_model, nerf_optim, pixels, imgs, rays_o, rays_d,
                                            poses, hwf,
                                            bound, num_samples, raybatch_size)
                 vid_save_path = os.path.join(cwd, "video")
-                # vid_frames = create_360_video(args.nerf, nerf_model, hwf, bound,
-                #                               device,
-                #                                idx, vid_save_path)
+                vid_frames = create_360_video(args.nerf, nerf_model, hwf, bound,
+                                              device,
+                                               idx, vid_save_path)
 
                 if "train" in setup:
                     logs[setup + "SSIM tto_step=" + str(i)] = scene_ssims
                     logs[setup + "LPIPS_vgg tto_step=" + str(i)] = scene_lpips_vgg
                     logs[setup + "LPIPS_alexnet tto_step=" + str(i)] = scene_lpips_alex
                     logs[setup + "scene_psnr tto_step=" + str(i)] = scene_psnr
-                    # logs[setup + "vid_post tto_step=" + str(i)] = wandb.Video(
-                    #             vid_frames.transpose(0, 3, 1, 2), fps=30,
-                    #             format="mp4")
+                    logs[setup + "vid_post tto_step=" + str(i)] = wandb.Video(
+                                vid_frames.transpose(0, 3, 1, 2), fps=30,
+                                format="mp4")
                 else:
                     logs[setup + "SSIM tto_step=" + str(i)] = scene_ssims
                     logs[setup + "LPIPS_vgg tto_step=" + str(i)] = scene_lpips_vgg
                     logs[setup + "LPIPS_alexnet tto_step=" + str(i)] = scene_lpips_alex
                     logs[setup + "scene_psnr tto_step=" + str(i)] = scene_psnr
-                    # logs[setup + "vid_post input_idx=" + str(input_idx) + " tto_step=" + str(i)] = wandb.Video(
-                    #             vid_frames.transpose(0, 3, 1, 2), fps=30,
-                    #             format="mp4")
+                    logs[setup + "vid_post input_idx=" + str(input_idx) + " tto_step=" + str(i)] = wandb.Video(
+                                vid_frames.transpose(0, 3, 1, 2), fps=30,
+                                format="mp4")
 
         indices = torch.randint(num_rays, size=[raybatch_size])
         raybatch_o, raybatch_d = rays_o[indices], rays_d[indices]
