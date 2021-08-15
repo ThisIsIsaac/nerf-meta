@@ -2,7 +2,7 @@
     "exp_name": "mvs_weight_gen_shapenet_lamps",
     "dataset_root": "/data/private/metaNeRF_datasets/shapenet/03636649",
     "splits_path": "/data/private/metaNeRF_datasets/shapenet/lamp_splits.json",
-    "nerf_weight_path": "./shapenet_lamps_fin.pth",
+    "nerf_weight_path": "/data/private/logs/metaNeRF/shapenet_lamps_fin.pth",
     "mvsnet_weight_path": "/root/mvsnerf/ckpts/mvsnerf-v0.tar",
     "log_interval": 100,
 

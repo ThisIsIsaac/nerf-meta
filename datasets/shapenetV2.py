@@ -25,7 +25,11 @@ class ShapenetDatasetV2(Dataset):
         self.debug_overfit_single_scene = False
         if getattr(args, "debug_overfit_single_scene")== True:
             self.debug_overfit_single_scene = True
-
+        self.transform = transforms.Compose(
+            [transforms.ToTensor(),
+             transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                  std=[0.229, 0.224, 0.225]),
+             ])
 
     def __getitem__(self, idx):
         if self.debug_overfit_single_scene:
@@ -43,7 +47,8 @@ class ShapenetDatasetV2(Dataset):
             img_name = f"{Path(frame['file_path']).stem}.png"
             img_path = folderpath.joinpath(img_name)
             img = imageio.imread(img_path)
-            imgs.append(torch.as_tensor(img, dtype=torch.float))
+            img = self.transform(img).type(torch.float)
+            imgs.append(img.permute(1, 2, 0))
 
             pose = frame["transform_matrix"]
             poses.append(torch.as_tensor(pose, dtype=torch.float))

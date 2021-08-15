@@ -63,7 +63,7 @@ class WeightGenerator(nn.Module):
         """Extract feature vectors from input images."""
         # source: https://github.com/yunjey/pytorch-tutorial/blob/0500d3df5a2a8080ccfccbc00aca0eacc21818db/tutorials/03-advanced/image_captioning/model.py#L18
         imgs = imgs.permute(0, 3, 1, 2)
-        imgs = self.transform(imgs)
+        # imgs = self.transform(imgs)
 
         if self.feature_extractor_type == "resnet":
             features=[]
