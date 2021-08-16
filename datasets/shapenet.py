@@ -3,7 +3,8 @@ import json
 import imageio
 import torch
 from torch.utils.data import Dataset
-
+from torchvision import transforms
+from PIL import Image
 
 class ShapenetDataset(Dataset):
     """
@@ -18,7 +19,11 @@ class ShapenetDataset(Dataset):
         super().__init__()
         self.all_folders = all_folders
         self.num_views = num_views
-
+        self.transform = transforms.Compose(
+            [transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                  std=[0.229, 0.224, 0.225]),
+             ])
     def __getitem__(self, idx):
         folderpath = self.all_folders[idx]
         meta_path = folderpath.joinpath("transforms.json")
@@ -32,13 +37,14 @@ class ShapenetDataset(Dataset):
 
             img_name = f"{Path(frame['file_path']).stem}.png"
             img_path = folderpath.joinpath(img_name)
-            img = imageio.imread(img_path)
-            all_imgs.append(torch.as_tensor(img, dtype=torch.float))
+            # img = imageio.imread(img_path)
+            img = Image.open(img_path)
+            all_imgs.append(self.transform(img).permute(1, 2, 0))
 
             pose = frame["transform_matrix"]
             all_poses.append(torch.as_tensor(pose, dtype=torch.float))
 
-        all_imgs = torch.stack(all_imgs, dim=0) / 255.
+        all_imgs = torch.stack(all_imgs, dim=0)
         # composite the images to a white background
         all_imgs = all_imgs[...,:3] * all_imgs[...,-1:] + 1-all_imgs[...,-1:]
 

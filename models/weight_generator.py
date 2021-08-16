@@ -93,8 +93,11 @@ class WeightGenerator(nn.Module):
 
         if self.feature_extractor_type == "mvsnet":
             features = self.feature_extractor(imgs, proj_mats, near_fars, pad=pad)[0]
-
+        N, C, D, H, W = features.shape
+        features = F.interpolate(features,size=[ D, D, D], mode="trilinear",
+                                 align_corners=True)
         features = torch.squeeze(self.compressor(features))
+
         features = features.view(-1)
         weight_res = self.gen(features)
         return weight_res

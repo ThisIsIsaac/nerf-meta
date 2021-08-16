@@ -74,10 +74,12 @@ def inner_loop(args, nerf_model, nerf_optim, pixels, imgs, rays_o, rays_d,
     for i in range(1, inner_steps+1):
         if log_round and ((i % args.nerf.tto_log_steps == 0) or (i == inner_steps) or (i==1)):
             with torch.no_grad():
-                scene_psnr, scene_lpips_alex, scene_lpips_vgg, scene_ssims\
-                            = report_result(nerf_model, imgs,
-                                           poses, hwf,
-                                           bound, num_samples, raybatch_size)
+                scene_psnr, scene_lpips_alex, scene_lpips_vgg, scene_ssims =\
+                    0, 0, 0, 0
+                # scene_psnr, scene_lpips_alex, scene_lpips_vgg, scene_ssims\
+                #             = report_result(nerf_model, imgs,
+                #                            poses, hwf,
+                #                            bound, num_samples, raybatch_size)
                 vid_save_path = os.path.join(cwd, "video")
                 vid_frames = create_360_video(args.nerf, nerf_model, hwf, bound,
                                               device,
@@ -301,7 +303,6 @@ def report_result(model, imgs, poses, hwf, bound, num_samples, raybatch_size):
             view_psnrs.append(psnr)
 
             # additional metrics (lpips alexnet, lpips vgg, ssim)
-
             img_lpips = torch.unsqueeze(img.permute(2, 0, 1) * 2 - 1, 0)
             synth_lpips = torch.unsqueeze(synth.permute(2, 0, 1) * 2 - 1, 0)
             view_lpips_alex.append(lpips_alex(img_lpips, synth_lpips))
@@ -380,9 +381,9 @@ def val_meta(args, epoch_idx, nerf_model, gen_model, val_loader, device):
 
 
             inner_val_model = copy.deepcopy(val_model)
-            for i in range(len(val_model.net)):
-                if hasattr(val_model.net[i], "weight"):
-                    layer = val_model.net[i].weight.clone()
+            for j in range(len(val_model.net)):
+                if hasattr(val_model.net[j], "weight"):
+                    layer = val_model.net[j].weight.clone()
                     layer.grad = None
                     inner_val_model.net[i].weight = nn.Parameter(layer)
 
