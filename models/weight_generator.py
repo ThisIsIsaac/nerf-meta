@@ -8,6 +8,15 @@ from models.mvsnerf import MVSNet
 import matplotlib.pyplot as plt
 import wandb
 
+def normalize_img(img, mean, std):
+    n, c, h, w = img.shape
+    for i in range(c):
+        m = img[:, i].mean()
+        v = img[:, i].std()
+        temp = (img[:, i] - m) / v
+        img[:, i] = temp*std[i] + mean[i]
+    return img
+
 class WeightGenerator(nn.Module):
     def __init__(self, args, out_channel):
         """Load the pretrained ResNet-152 and replace top fc layer."""
@@ -57,7 +66,7 @@ class WeightGenerator(nn.Module):
         """Extract feature vectors from input images."""
         # source: https://github.com/yunjey/pytorch-tutorial/blob/0500d3df5a2a8080ccfccbc00aca0eacc21818db/tutorials/03-advanced/image_captioning/model.py#L18
         imgs = imgs.permute(0, 3, 1, 2)
-        imgs = transforms.functional.normalize(imgs, mean=[0.485, 0.456, 0.406],
+        imgs = normalize_img(imgs, mean=[0.485, 0.456, 0.406],
                                   std=[0.229, 0.224, 0.225])
         # imgs = self.transform(imgs)
 
