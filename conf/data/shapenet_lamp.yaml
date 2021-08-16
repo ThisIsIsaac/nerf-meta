@@ -1,4 +1,3 @@
-# @package _group_
 name: shapenet_lamp
 dataset_root: /data/private/metaNeRF_datasets/shapenet/03636649
 splits_path: /data/private/metaNeRF_datasets/shapenet/lamp_splits.json

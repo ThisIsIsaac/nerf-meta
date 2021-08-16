@@ -26,7 +26,7 @@ torch.manual_seed(SEED)
 random.seed(SEED)
 np.random.seed(SEED)
 import lpips
-# from piq import ssim
+import pytorch_ssim
 import logging
 import hydra
 from omegaconf import DictConfig
@@ -76,10 +76,10 @@ def inner_loop(args, nerf_model, nerf_optim, pixels, imgs, rays_o, rays_d,
             with torch.no_grad():
                 scene_psnr, scene_lpips_alex, scene_lpips_vgg, scene_ssims =\
                     0, 0, 0, 0
-                # scene_psnr, scene_lpips_alex, scene_lpips_vgg, scene_ssims\
-                #             = report_result(nerf_model, imgs,
-                #                            poses, hwf,
-                #                            bound, num_samples, raybatch_size)
+                scene_psnr, scene_lpips_alex, scene_lpips_vgg, scene_ssims\
+                            = report_result(nerf_model, imgs,
+                                           poses, hwf,
+                                           bound, num_samples, raybatch_size)
                 vid_save_path = os.path.join(cwd, "video")
                 vid_frames = create_360_video(args.nerf, nerf_model, hwf, bound,
                                               device,
@@ -174,9 +174,9 @@ def train_meta(args, epoch_idx, nerf_model, gen_model, gen_optim, data_loader, d
         colors = volume_render(rgbs, sigmas, t_vals, white_bkgd=True)
 
         loss = F.mse_loss(colors, pixelbatch)
-        loss.backward()
-        gen_optim.step()
-        gen_optim.zero_grad()
+        # loss.backward()
+        # gen_optim.step()
+        # gen_optim.zero_grad()
 
         #! this block causes problem when trying to do reptile loss since
         #! weight assignment is an in-place operation
@@ -197,22 +197,18 @@ def train_meta(args, epoch_idx, nerf_model, gen_model, gen_optim, data_loader, d
                     device=device, idx=idx, log_round=log_round, setup="train/")
 
         if args.feat.use_reptile_loss:
-            # reptile_loss = 0
-            # with torch.no_grad():
             gt_res = []
             for i in range(args.nerf_hidden_layers):
                 l = i * 2 + 1
                 gt_res.append(torch.flatten(tto_nerf_model.net[l].weight.data - nerf_model.net[l].weight.data))
             gt_res = torch.cat(gt_res).detach().requires_grad_(True)
             gt_res.grad=None
-            # gt_res = gt_res.view(-1)
             reptile_loss= F.mse_loss(gt_res, weight_res)*args.feat.reptile_loss_weight
             loss += reptile_loss
 
-            # loss += reptile_loss
-        # loss.backward()
-        # gen_optim.step()
-        # gen_optim.zero_grad()
+        loss.backward()
+        gen_optim.step()
+        gen_optim.zero_grad()
 
         if log_round:
             if args.feat.use_reptile_loss:
@@ -307,14 +303,13 @@ def report_result(model, imgs, poses, hwf, bound, num_samples, raybatch_size):
             synth_lpips = torch.unsqueeze(synth.permute(2, 0, 1) * 2 - 1, 0)
             view_lpips_alex.append(lpips_alex(img_lpips, synth_lpips))
             view_lpips_vgg.append(lpips_vgg(img_lpips, synth_lpips))
-            # view_ssims.append(ssim(torch.unsqueeze(img.permute(2, 0, 1), 0),
-            #                        torch.unsqueeze(synth.permute(2, 0, 1), 0)))
+            view_ssims.append(pytorch_ssim.ssim(torch.unsqueeze(img, dim=0),
+                                                torch.unsqueeze(synth, dim=0)))
 
     scene_psnr = torch.stack(view_psnrs).mean()
     scene_lpips_alex = torch.stack(view_lpips_alex).mean()
     scene_lpips_vgg = torch.stack(view_lpips_vgg).mean()
-    # scene_ssim = torch.stack(view_ssims).mean()
-    scene_ssim=torch.Tensor([0.0])
+    scene_ssim = torch.stack(view_ssims).mean()
     return scene_psnr, scene_lpips_alex, scene_lpips_vgg, scene_ssim
 
 
