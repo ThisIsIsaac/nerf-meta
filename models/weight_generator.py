@@ -7,6 +7,15 @@ from torchvision import transforms
 from models.mvsnerf import MVSNet
 import wandb
 
+def normalize_img(img, mean, std):
+    n, c, h, w = img.shape
+    for i in range(c):
+        m = img[:, i].mean()
+        v = img[:, i].std()
+        temp = (img[:, i] - m) / v
+        img[:, i] = temp*std[i] + mean[i]
+    return img
+
 class WeightGenerator(nn.Module):
     def __init__(self, args, out_channel):
         """Load the pretrained ResNet-152 and replace top fc layer."""
@@ -22,10 +31,10 @@ class WeightGenerator(nn.Module):
 
             # Image preprocessing, normalization for the pretrained resnet
             # source: https://github.com/yunjey/pytorch-tutorial/blob/0500d3df5a2a8080ccfccbc00aca0eacc21818db/tutorials/03-advanced/image_captioning/train.py#L22
-            # self.transform = transforms.Compose([
-            #     transforms.Normalize((0.485, 0.456, 0.406),
-            #                          (0.229, 0.224, 0.225))
-            # ])
+            self.transform = transforms.Compose([
+                transforms.Normalize((0.485, 0.456, 0.406),
+                                     (0.229, 0.224, 0.225))
+            ])
             self.compressor = nn.Sequential(
                 nn.Conv3d(25, 8, kernel_size=7, stride=2, padding=3), nn.ReLU())
             self.in_channel = 753664
@@ -68,7 +77,7 @@ class WeightGenerator(nn.Module):
         """Extract feature vectors from input images."""
         # source: https://github.com/yunjey/pytorch-tutorial/blob/0500d3df5a2a8080ccfccbc00aca0eacc21818db/tutorials/03-advanced/image_captioning/model.py#L18
         imgs = imgs.permute(0, 3, 1, 2)
-        # imgs = self.transform(imgs)
+        imgs = normalize_img(imgs, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
         if self.feature_extractor_type == "vgg":
             features=[]

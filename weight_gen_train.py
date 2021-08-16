@@ -172,6 +172,9 @@ def train_meta(args, epoch_idx, nerf_model, gen_model, gen_optim, data_loader, d
         colors = volume_render(rgbs, sigmas, t_vals, white_bkgd=True)
 
         loss = F.mse_loss(colors, pixelbatch)
+        loss.backward()
+        gen_optim.step()
+        gen_optim.zero_grad()
 
         #! this block causes problem when trying to do reptile loss since
         #! weight assignment is an in-place operation
@@ -205,9 +208,9 @@ def train_meta(args, epoch_idx, nerf_model, gen_model, gen_optim, data_loader, d
             loss += reptile_loss
 
             # loss += reptile_loss
-        loss.backward()
-        gen_optim.step()
-        gen_optim.zero_grad()
+        # loss.backward()
+        # gen_optim.step()
+        # gen_optim.zero_grad()
 
         if log_round:
             if args.feat.use_reptile_loss:
